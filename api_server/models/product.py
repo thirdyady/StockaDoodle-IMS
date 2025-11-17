@@ -1,4 +1,4 @@
-from app import db
+from extensions import db
 import base64
 
 class Product(db.Model):
