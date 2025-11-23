@@ -1,30 +1,50 @@
 from extensions import db
-from sqlalchemy.sql import func
-from datetime import datetime
+from werkzeug.security import generate_password_hash, check_password_hash
+import base64
 
 class User(db.Model):
     __tablename__ = 'users'
+
+    # id of the user
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(128), nullable=False)
-    role = db.Column(db.String(20), default='Retailer')  # Admin, Manager, Retailer
-    is_active = db.Column(db.Boolean, default=True)
-    profile_pic_blob = db.Column(db.LargeBinary, nullable=True)
-    created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
 
-    # Relationships (defined as strings to avoid circular import issues on import time)
-    # sales -> relationship from Sale model backref 'retailer'
-    # metrics -> relationship from RetailerMetrics model backref 'retailer', uselist=False
+    # full name for display
+    full_name = db.Column(db.String(120), nullable=False)
 
-    def to_dict(self, include_blob=False):
-        d = {
-            'id': self.id,
-            'username': self.username,
-            'role': self.role,
-            'is_active': self.is_active,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+    # used for login
+    username = db.Column(db.String(120), unique=True, nullable=False)
+
+    # staff/admin/etc
+    role = db.Column(db.String(50), default="staff")
+
+    # hashed password only
+    password_hash = db.Column(db.String(255), nullable=False)
+
+    # optional profile picture
+    user_image = db.Column(db.LargeBinary)
+
+    # batches added by this user
+    stock_batches = db.relationship('StockBatch', backref='added_by_user', lazy=True)
+
+    def set_password(self, password):
+        # turn plain password into hashed password
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        # check if password is correct
+        return check_password_hash(self.password_hash, password)
+
+    def to_dict(self, include_image=False):
+        data = {
+            "id": self.id,
+            "full_name": self.full_name,
+            "username": self.username,
+            "role": self.role,
+            "has_image": self.user_image is not None
         }
-        if include_blob and self.profile_pic_blob:
-            import base64
-            d['profile_pic_base64'] = base64.b64encode(self.profile_pic_blob).decode('utf-8')
-        return d
+
+        if include_image and self.user_image:
+            # return user image as base64 string
+            data["image_base64"] = base64.b64encode(self.user_image).decode("utf-8")
+
+        return data
