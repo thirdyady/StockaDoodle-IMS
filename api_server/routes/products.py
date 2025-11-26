@@ -6,6 +6,8 @@ from models.category import Category
 from models.stock_batch import StockBatch
 from models.user import User
 from core.inventory_manager import InventoryManager, InventoryError
+from core.activity_logger import ActivityLogger
+
 
 from utils import get_image_blob, extract_int, parse_date
 from datetime import datetime, timezone
@@ -70,7 +72,7 @@ def list_product():
         filters.append(Product.brand.ilike(f"%{brand}%"))  
         
     if category_id:
-        filter.append(Product.category_id == category_id)    
+        filters.append(Product.category_id == category_id)    
     
     if price_gt and price_gt.isdigit():
         filters.append(Product.price > int(price_gt))
@@ -312,6 +314,15 @@ def replace_product(product_id):
         product.image_blob = new_image
 
     db.session.commit()
+    
+    # Log activity
+    ActivityLogger.log_api_activity(
+        method='PUT',
+        target_entity='product',
+        user_id=data.get('added_by') or API_USER_ID,
+        details=f"Replaced product id={product.id}, name={product.name}"
+    )
+    
     return jsonify(product.to_dict(include_image=True, include_batches=True))
 
 
@@ -375,6 +386,22 @@ def patch_product(id):
         product.image_blob = new_image
         
     db.session.commit()
+    
+    changed_fields = [
+        k for k in ('name', 'price', 'brand', 'category_id', 'min_stock_level', 'details')
+        if k in data
+    ]
+    if 'stock_level' in data:
+        changed_fields.append("stock_level")
+
+    # SAFE LOGGING
+    ActivityLogger.log_api_activity(
+        method='PATCH',
+        target_entity='product',
+        user_id=data.get('added_by') or API_USER_ID,
+        details=f"Updated product id={product.id}: {', '.join(changed_fields)}"
+    )
+    
     return jsonify(product.to_dict(include_image=True, include_batches=True))
         
 # ----------------------------------------------------------------------
@@ -440,10 +467,24 @@ def update_stock_batch_metadata(product_id, batch_id):
 # ----------------------------------------------------------------------
 @bp.route('/<int:id>', methods=['DELETE'])
 def delete_product(id):
+    
+    data = request.get_json(silent=True) or {}
+    user_id = data.get('user_id') or API_USER_ID
+    
     product = Product.query.get_or_404(id)
+    name = product.name
     db.session.delete(product)
     db.session.commit()
-    return jsonify({"message": f"{product.name} product was deleted successfully from inventory."}), 200
+    
+    # Log deletion
+    ActivityLogger.log_api_activity(
+        method='DELETE',
+        target_entity='product',
+        user_id=user_id,
+        details=f"Deleted product id={id}, name={name}"
+    )
+    
+    return jsonify({"message": f"{name} product was deleted successfully from inventory."}), 200
 
 # ----------------------------------------------------------------------
 # DELETE /api/v1/products/<product_id>/stock_batches/<batch_id> → delete batch
