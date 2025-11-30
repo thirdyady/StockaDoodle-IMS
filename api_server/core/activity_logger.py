@@ -1,4 +1,3 @@
-from extensions import db
 from models.product_log import ProductLog
 from models.api_activity_log import APIActivityLog
 from datetime import datetime, timezone
@@ -26,13 +25,12 @@ class ActivityLogger:
         """
         log = ProductLog(
             product_id=product_id,
-            user_id=user_id,
+            user=user_id,
             action_type=action_type,
             notes=notes,
             log_time=datetime.now(timezone.utc)
         )
-        db.session.add(log)
-        db.session.commit()
+        log.save()
         return log
 
     @staticmethod
@@ -53,13 +51,12 @@ class ActivityLogger:
         log = APIActivityLog(
             method=method,
             target_entity=target_entity,
-            user_id=user_id,
+            user=user_id,
             source=source,
             details=details,
             timestamp=datetime.now(timezone.utc)
         )
-        db.session.add(log)
-        db.session.commit()
+        log.save()
         return log
 
     @staticmethod
@@ -75,11 +72,9 @@ class ActivityLogger:
             list: List of ProductLog entries
         """
         return (
-            ProductLog.query
-            .filter_by(product_id=product_id)
-            .order_by(ProductLog.log_time.desc())
+            ProductLog.objects(product_id=product_id)
+            .order_by('-log_time')
             .limit(limit)
-            .all()
         )
 
     @staticmethod
@@ -95,11 +90,9 @@ class ActivityLogger:
             list: List of ProductLog entries
         """
         return (
-            ProductLog.query
-            .filter_by(user_id=user_id)
-            .order_by(ProductLog.log_time.desc())
+            ProductLog.objects(user_id=user_id)
+            .order_by('-log_time')
             .limit(limit)
-            .all()
         )
 
     @staticmethod
@@ -114,12 +107,12 @@ class ActivityLogger:
         Returns:
             list: List of ProductLog entries
         """
-        query = ProductLog.query
+        query = ProductLog.objects()
         
         if action_type:
             query = query.filter_by(action_type=action_type)
             
-        return query.order_by(ProductLog.log_time.desc()).limit(limit).all()
+        return query.order_by('-log_time').limit(limit)
 
     @staticmethod
     def get_api_logs(limit=100, method=None, target_entity=None):
@@ -134,11 +127,11 @@ class ActivityLogger:
         Returns:
             list: List of APIActivityLog entries
         """
-        query = APIActivityLog.query
+        query = APIActivityLog.objects()
         
         if method:
             query = query.filter_by(method=method)
         if target_entity:
             query = query.filter_by(target_entity=target_entity)
             
-        return query.order_by(APIActivityLog.timestamp.desc()).limit(limit).all()
+        return query.order_by('-timestamp').limit(limit)

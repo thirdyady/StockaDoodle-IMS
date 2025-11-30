@@ -1,4 +1,3 @@
-from extensions import db
 from models.user import User
 from models.retailer_metrics import RetailerMetrics
 from werkzeug.security import generate_password_hash
@@ -27,7 +26,7 @@ class UserManager:
         Returns:
             User: User object if authentication successful, None otherwise
         """
-        user = User.query.filter_by(username=username).first()
+        user = User.objects(username=username).first()
         
         if not user:
             return None
@@ -38,7 +37,7 @@ class UserManager:
         return None
 
     @staticmethod
-    def create_user(username, password, full_name, role="staff", user_image=None):
+    def create_user(username, password, full_name, email, role="staff", user_image=None):
         """
         Create a new user account.
         
@@ -56,10 +55,16 @@ class UserManager:
             UserError: If username exists or validation fails
         """
         # Check if username already exists
-        existing = User.query.filter_by(username=username).first()
+        existing = User.objects(username=username).first()
         if existing:
             raise UserError(f"Username '{username}' already exists")
 
+        # Check if email already exists
+        if email:
+            existing_email = User.objects(email=email).first()
+            if existing_email:
+                raise UserError(f"Email '{email}' already exists")
+            
         # Validate role
         valid_roles = ['admin', 'manager', 'staff', 'retailer']
         if role not in valid_roles:
@@ -69,24 +74,22 @@ class UserManager:
         user = User(
             username=username,
             full_name=full_name,
+            email=email,
             role=role,
             user_image=user_image
         )
         user.set_password(password)
-        
-        db.session.add(user)
-        db.session.flush()  # Get user ID
-
+        user.save()
+    
         # Create retailer metrics if role is retailer
         if role in ['retailer', 'staff']:
             metrics = RetailerMetrics(
                 retailer_id=user.id,
-                daily_quota=500.0,  # Default quota
+                daily_quota=1000.0,  # Default quota
                 current_streak=0
             )
-            db.session.add(metrics)
+            metrics.save()
 
-        db.session.commit()
         return user
 
     @staticmethod
@@ -100,7 +103,7 @@ class UserManager:
         Returns:
             User: User object or None if not found
         """
-        return User.query.get(user_id)
+        return User.objects(id=user_id).first()
 
     @staticmethod
     def get_user_by_username(username):
@@ -113,7 +116,7 @@ class UserManager:
         Returns:
             User: User object or None if not found
         """
-        return User.query.filter_by(username=username).first()
+        return User.objects(username=username).first()
 
     @staticmethod
     def get_all_users(role=None):
@@ -126,12 +129,12 @@ class UserManager:
         Returns:
             list: List of User objects
         """
-        query = User.query
+        query = User.objects()
         
         if role:
-            query = query.filter_by(role=role)
+            query = query.filter(role=role)
         
-        return query.order_by(User.full_name).all()
+        return query.order_by('full_name')
 
     @staticmethod
     def update_user(user_id, **kwargs):
@@ -148,7 +151,7 @@ class UserManager:
         Raises:
             UserError: If user not found or validation fails
         """
-        user = User.query.get(user_id)
+        user = User.objects(id=user_id).first()
         if not user:
             raise UserError(f"User ID {user_id} not found")
 
@@ -157,12 +160,20 @@ class UserManager:
             existing = User.query.filter_by(username=kwargs['username']).first()
             if existing:
                 raise UserError(f"Username '{kwargs['username']}' already exists")
+        
+        # Check email uniqueness if changing
+        if 'email' in kwargs and kwargs['email'] != user.email:
+            existing = User.objects(email=kwargs['email']).first()
+            if existing:
+                raise UserError(f"Email '{kwargs['email']}' already exists")
 
         # Update fields
         if 'username' in kwargs:
             user.username = kwargs['username']
         if 'full_name' in kwargs:
             user.full_name = kwargs['full_name']
+        if 'email' in kwargs:
+            user.email = kwargs['email']
         if 'role' in kwargs:
             valid_roles = ['admin', 'manager', 'staff', 'retailer']
             if kwargs['role'] not in valid_roles:
@@ -173,7 +184,7 @@ class UserManager:
         if 'user_image' in kwargs:
             user.user_image = kwargs['user_image']
 
-        db.session.commit()
+        user.save()
         return user
 
     @staticmethod
@@ -190,12 +201,11 @@ class UserManager:
         Raises:
             UserError: If user not found
         """
-        user = User.query.get(user_id)
+        user = User.objects(id=user_id).first()
         if not user:
             raise UserError(f"User ID {user_id} not found")
 
-        db.session.delete(user)
-        db.session.commit()
+        user.delete()
         return True
 
     @staticmethod
@@ -214,7 +224,7 @@ class UserManager:
         Raises:
             UserError: If verification fails
         """
-        user = User.query.get(user_id)
+        user = User.objects(id=user_id).first
         if not user:
             raise UserError(f"User ID {user_id} not found")
 
@@ -222,7 +232,7 @@ class UserManager:
             raise UserError("Current password is incorrect")
 
         user.set_password(new_password)
-        db.session.commit()
+        user.save()
         return True
 
     @staticmethod
@@ -240,12 +250,12 @@ class UserManager:
         Raises:
             UserError: If user not found
         """
-        user = User.query.get(user_id)
+        user = User.objects(id=user_id).first()
         if not user:
             raise UserError(f"User ID {user_id} not found")
 
         user.set_password(new_password)
-        db.session.commit()
+        user.save()
         return True
 
     @staticmethod
@@ -260,7 +270,7 @@ class UserManager:
         Returns:
             bool: True if user has permission
         """
-        user = User.query.get(user_id)
+        user = User.objects(id=user_id).first()
         if not user:
             return False
 
