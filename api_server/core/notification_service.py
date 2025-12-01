@@ -80,7 +80,7 @@ class NotificationService:
             return {'status': 'no_alerts', 'count': 0}
         
         # Get all managers
-        managers = User.query.filter(User.role.in_(['admin', 'manager'])).all()
+        managers = User.objects(role__in=['admin', 'manager'])
         
         if not managers:
             return {'status': 'no_recipients', 'count': 0}
@@ -111,7 +111,6 @@ StockaDoodle Alert System
         sent_count = 0
         for manager in managers:
             # In production, use manager's email address
-            # For now, use a placeholder or environment variable
             manager_email = os.getenv('MANAGER_EMAIL', 'manager@example.com')
             if NotificationService.send_email(manager_email, subject, body):
                 sent_count += 1
@@ -120,7 +119,7 @@ StockaDoodle Alert System
             'status': 'sent',
             'alerts_sent': sent_count,
             'products_count': len(low_stock_products),
-            'recipients': len(managers)
+            'recipients': manager.count()
         }
     
     @staticmethod
@@ -140,17 +139,20 @@ StockaDoodle Alert System
             return {'status': 'no_alerts', 'count': 0}
         
         # Get all managers
-        managers = User.query.filter(User.role.in_(['admin', 'manager'])).all()
+        managers = User.objects(role__in=['admin', 'manager'])
         
         if not managers:
             return {'status': 'no_recipients', 'count': 0}
         
         # Group batches by product
+        from models.product import Product
         products_expiring = {}
         for batch in expiring_batches:
-            if batch.product.name not in products_expiring:
-                products_expiring[batch.product.name] = []
-            products_expiring[batch.product.name].append(batch)
+            product = Product.objects(id=batch.product).first()
+            if product:
+                if product.name not in products_expiring:
+                    products_expiring[product.name] = []
+                products_expiring[product.name].append(batch)
         
         # Build alert message
         subject = f"⏰ Expiration Alert - {len(products_expiring)} Products Expiring Soon"
@@ -187,7 +189,7 @@ StockaDoodle Alert System
             'alerts_sent': sent_count,
             'products_count': len(products_expiring),
             'batches_count': len(expiring_batches),
-            'recipients': len(managers)
+            'recipients': manager.count()
         }
     
     @staticmethod
@@ -204,7 +206,7 @@ StockaDoodle Alert System
         if not low_stock and not expiring:
             return {'status': 'no_alerts', 'message': 'No alerts to send'}
         
-        managers = User.query.filter(User.role.in_(['admin', 'manager'])).all()
+        managers = User.objects(role__in=['admin', 'manager'])
         
         if not managers:
             return {'status': 'no_recipients'}
@@ -225,11 +227,19 @@ Daily Inventory Summary
             body += "\n"
         
         if expiring:
-            products_expiring = set(batch.product.name for batch in expiring)
+            from models.product import Product
+            products_expiring = set()
+            for batch in expiring:
+                product = Product.objects(id=batch.product).first()
+                if product:
+                    products_expiring.add(product.name)
+
             body += f"⏰ EXPIRATION ALERTS: {len(products_expiring)} products with expiring batches\n\n"
             for batch in expiring[:5]:  # Show top 5
-                days_until = (batch.expiration_date - date.today()).days
-                body += f"• {batch.product.name}: Batch #{batch.id} expires in {days_until} days\n"
+                product = Product.objects(id=batch.product).first()
+                if product:
+                    days_until = (batch.expiration_date - date.today()).days
+                    body += f"• {product.name}: Batch #{batch.id} expires in {days_until} days\n"
             if len(expiring) > 5:
                 body += f"  ... and {len(expiring) - 5} more batches\n"
         
