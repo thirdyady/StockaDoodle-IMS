@@ -72,37 +72,45 @@ Develop initial SQLite database schema and implement CRUD endpoints for Products
 
 ---
 
-### **Milestone 3 (Nov Week 3): User Roles & Authentication**
+### **Milestone 3 (Nov Week 3): Core System & Logging**
 **What we'll do:**  
-Add authentication (Admin, Manager, Retailer) and role-based access control.
+Implement core backend services, centralized logging, and inventory management features.
 
 **Deliverables:**  
-- Secure login and JWT authentication  
-- Role-based API restrictions  
-- Updated API documentation  
+- ActivityLogger for product actions and API activity  
+- InventoryManager with FEFO stock management
+- MFA Service for secure multi-factor authentication
+- UserManager for authentication, role-based access, and CRUD
+-Initialize all models (category, product, sale, user, stock_batch, api_activity_log, product_log, retailer_metrics)
 
 **Checklists:**  
-- [ ] Add `/login` endpoint  
-- [ ] Implement JWT tokens  
-- [ ] Restrict routes by role  
-- [ ] Commit and push updates  
+- [ ] Add ActivityLogger methods for product and API audit trails
+- [ ] Implement FEFO logic and stock validation in InventoryManager
+- [ ] Add MFA generation, verification, and expiry tracking
+- [ ] Implement UserManager with authentication, roles, and permission checks
+- [ ] Create database models and initialize tables in app.py
+- [ ] Commit and push updates
 
 ---
 
-### **Milestone 4 (Nov Week 4): Reports & Testing**
+### **Milestone 4 (Nov Week 4): Routes, Reports & Notifications**
 **What we'll do:**  
-Generate sales and performance reports. Conduct system testing for reliability and accuracy.
+Build API routes, integrate core services, and implement reporting and notification features.
 
 **Deliverables:**  
-- Reports endpoints (e.g., `/reports/sales`)  
-- System testing results  
-- Debug log cleanup  
+- CRUD routes for category, products, sales, users, and logs
+- SalesManager for atomic sales, gamification, and retailer metrics
+- ReportGenerator for all 7 required reports (sales, categories, retailer performance, low-stock alerts, etc.)
+- NotificationService for automated email alerts (low-stock and expiring batches)
+- Register all blueprints in app.py
 
 **Checklists:**  
-- [ ] Implement report endpoints  
-- [ ] Validate calculations  
-- [ ] Perform integration testing  
-- [ ] Commit and push  
+- [ ] Implement and test CRUD routes for all entities (category, products, sales, users, logs)
+- [ ] Integrate SalesManager with FEFO inventory deductions and performance tracking
+- [ ] Add report generation functionality and verify outputs
+- [ ] Set up NotificationService for automated alerts
+- [ ] Register all routes in app.py
+- [ ] Commit and push updates
 
 ---
 
