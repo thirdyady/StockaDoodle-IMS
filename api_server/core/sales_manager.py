@@ -1,3 +1,4 @@
+from api_server.utils.counters import get_next_sequence
 from models.sale import Sale, SaleItem
 from models.product import Product
 from models.retailer_metrics import RetailerMetrics
@@ -65,12 +66,14 @@ class SalesManager:
             # Phase 4: Create sale items
             for item in items:
                 sale_item = SaleItem(
-                    sale_id=sale.id,
+                    id=get_next_sequence('saleitem'),     
                     product_id=item['product_id'],
                     quantity=item['quantity'],
                     line_total=item['line_total']
                 )
-                sale_item.save()
+                sale.items.append(sale_item)
+            
+            sale_item.save()
 
             # Phase 5: Update retailer metrics
             SalesManager._update_retailer_metrics(retailer_id, total_amount)
@@ -108,7 +111,7 @@ class SalesManager:
         if not metrics:
             # Create new metrics record
             metrics = RetailerMetrics(
-                retailer_id=retailer_id,
+                retailer=retailer_id,
                 daily_quota=1000.0,  # Default quota
                 sales_today=0.0,
                 total_sales=0.0,

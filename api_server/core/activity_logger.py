@@ -72,7 +72,7 @@ class ActivityLogger:
             list: List of ProductLog entries
         """
         return (
-            ProductLog.objects(product=product_id)
+            ProductLog.objects(product_id=product_id)
             .order_by('-log_time')
             .limit(limit)
         )
@@ -130,8 +130,8 @@ class ActivityLogger:
         query = APIActivityLog.objects()
         
         if method:
-            query = query.filter_by(method=method)
+            query = query.filter(method=method)
         if target_entity:
-            query = query.filter_by(target_entity=target_entity)
+            query = query.filter(target_entity=target_entity)
             
         return query.order_by('-timestamp').limit(limit)

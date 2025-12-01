@@ -55,8 +55,8 @@ class InventoryManager:
 
         # Sort batches: earliest expiration first, NULLs last, then oldest added first
         batches = (
-            StockBatch.objects(product=product_id)
-            .order_by("expiration_date", "added_at")
+            StockBatch.objects(product_id=product_id)
+            .order_by("+expiration_date", "+added_at") # Use "+" for ascending (nulls last)
         )
 
         remaining = qty_needed
@@ -70,13 +70,13 @@ class InventoryManager:
             deduct_qty = min(batch.quantity, remaining)
             batch.quantity -= deduct_qty
             remaining -= deduct_qty
+            batch.save()
 
         if remaining > 0:
             raise InventoryError(
                 f"FEFO deduction failed — insufficient stock for product '{product.name}'"
             )
 
-        batch.save()
         return True
 
     # --------------------------------------------------------------

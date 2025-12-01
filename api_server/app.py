@@ -1,29 +1,26 @@
 import os
 from flask import Flask, jsonify
-from extensions import db, migrate
+from flask_mongoengine import MongoEngine
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Make DB path absolute inside api_server
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-DB_PATH = os.path.join(BASE_DIR, 'stockadoodle.db')
+db = MongoEngine()
 
 def create_app():
     app = Flask(__name__)
     
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'stockadoodle-dev-2025')
-    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DB_PATH}'
-    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-    # ← CRITICAL: These two lines MUST be here!
+    app.config['MONGODB_SETTINGS'] = {
+        'db': os.getenv('DATABASE_NAME', 'stockadoodle'),
+        'host': os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
+    }
+    
     db.init_app(app)
-    migrate.init_app(app, db)
 
     # Import models AFTER init_app
     with app.app_context():
         from models import category, product, api_activity_log, product_log, retailer_metrics, sale, stock_batch, user
-        db.create_all()
 
     # Register blueprint
     from routes.products import bp as products_bp
@@ -66,7 +63,7 @@ def create_app():
         return jsonify({
             "message": "StockaDoodle API LIVE!",
             "status": "Production Ready",
-            "database": "stockadoodle.db"
+            "database": "MongoDB"
         })
 
     @app.route('/api/v1/health')

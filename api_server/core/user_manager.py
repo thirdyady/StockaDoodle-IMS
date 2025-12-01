@@ -31,6 +31,10 @@ class UserManager:
         if not user:
             return None
         
+        # ADD: Check if user is active before allowing login
+        if not user.is_active:
+            raise UserError("Account is deactivated. Please contact your administrator.")
+        
         if user.check_password(password):
             return user
         
@@ -76,7 +80,8 @@ class UserManager:
             full_name=full_name,
             email=email,
             role=role,
-            user_image=user_image
+            user_image=user_image,
+            is_active=True
         )
         user.set_password(password)
         user.save()
@@ -84,7 +89,7 @@ class UserManager:
         # Create retailer metrics if role is retailer
         if role in ['retailer', 'staff']:
             metrics = RetailerMetrics(
-                retailer_id=user.id,
+                retailer=user,
                 daily_quota=1000.0,  # Default quota
                 current_streak=0
             )
@@ -119,12 +124,13 @@ class UserManager:
         return User.objects(username=username).first()
 
     @staticmethod
-    def get_all_users(role=None):
+    def get_all_users(role=None, include_inactive=False):
         """
         Get all users, optionally filtered by role.
         
         Args:
-            role (str, optional): Filter by specific role
+            role (str, optional): Filter by specific role            
+            include_inactive (bool): Whether to include inactive users
             
         Returns:
             list: List of User objects
@@ -133,6 +139,9 @@ class UserManager:
         
         if role:
             query = query.filter(role=role)
+        
+        if not include_inactive:
+            query = query.filter(is_active=True)
         
         return query.order_by('full_name')
 
@@ -183,7 +192,9 @@ class UserManager:
             user.set_password(kwargs['password'])
         if 'user_image' in kwargs:
             user.user_image = kwargs['user_image']
-
+        if 'is_active' in kwargs:
+            user.is_active = bool(kwargs['is_active'])
+            
         user.save()
         return user
 
@@ -207,6 +218,85 @@ class UserManager:
 
         user.delete()
         return True
+    
+    @staticmethod
+    def toggle_user_active_status(user_id):
+        """
+        Toggle a user's active status.
+        
+        Args:
+            user_id (int): User ID
+            
+        Returns:
+            User: Updated user object
+            
+        Raises:
+            UserError: If user not found
+        """
+        user = User.objects(id=user_id).first()
+        if not user:
+            raise UserError(f"User ID {user_id} not found")
+        
+        # Toggle the status
+        user.is_active = not user.is_active
+        user.save()
+        
+        return user
+    
+    @staticmethod
+    def deactivate_user(user_id, reason=None):
+        """
+        Deactivate a user account (soft delete).
+        
+        Args:
+            user_id (int): User ID
+            reason (str, optional): Reason for deactivation
+            
+        Returns:
+            User: Updated user object
+            
+        Raises:
+            UserError: If user not found
+        """
+        user = User.objects(id=user_id).first()
+        if not user:
+            raise UserError(f"User ID {user_id} not found")
+        
+        user.is_active = False
+        user.save()
+        
+        from core.activity_logger import ActivityLogger
+        ActivityLogger.log_api_activity(
+            method='PATCH',
+            target_entity='user',
+            user_id=user_id,
+            details=f"User deactivated. Reason: {reason or 'Not specified'}"
+        )
+        
+        return user
+    
+    @staticmethod
+    def reactivate_user(user_id):
+        """
+        Reactivate a previously deactivated user account.
+        
+        Args:
+            user_id (int): User ID
+            
+        Returns:
+            User: Updated user object
+            
+        Raises:
+            UserError: If user not found
+        """
+        user = User.objects(id=user_id).first()
+        if not user:
+            raise UserError(f"User ID {user_id} not found")
+        
+        user.is_active = True
+        user.save()
+        
+        return user
 
     @staticmethod
     def change_password(user_id, old_password, new_password):
@@ -273,6 +363,10 @@ class UserManager:
         user = User.objects(id=user_id).first()
         if not user:
             return False
+        
+        user = User.objects(id=user_id).first()
+        if not user:
+            return False
 
         if isinstance(required_role, str):
             return user.role == required_role
@@ -280,3 +374,20 @@ class UserManager:
             return user.role in required_role
         
         return False
+    
+    @staticmethod
+    def is_user_active(user_id):
+        """
+        Check if a user account is active.
+        
+        Args:
+            user_id (int): User ID
+            
+        Returns:
+            bool: True if user exists and is active
+        """
+        user = User.objects(id=user_id).first()
+        if not user:
+            return False
+        
+        return user.is_active
