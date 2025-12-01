@@ -148,7 +148,7 @@ StockaDoodle Alert System
         from models.product import Product
         products_expiring = {}
         for batch in expiring_batches:
-            product = Product.objects(id=batch.product).first()
+            product = Product.objects(id=batch.product.id if hasattr(batch.product, 'id') else batch.product).first()
             if product:
                 if product.name not in products_expiring:
                     products_expiring[product.name] = []
@@ -233,13 +233,13 @@ Daily Inventory Summary
             from models.product import Product
             products_expiring = set()
             for batch in expiring:
-                product = Product.objects(id=batch.product).first()
+                product = Product.objects(id=batch.product.id if hasattr(batch.product, 'id') else batch.product).first()
                 if product:
                     products_expiring.add(product.name)
 
             body += f"⏰ EXPIRATION ALERTS: {len(products_expiring)} products with expiring batches\n\n"
             for batch in expiring[:5]:  # Show top 5
-                product = Product.objects(id=batch.product).first()
+                product = Product.objects(id=batch.product.id if hasattr(batch.product, 'id') else batch.product).first()
                 if product:
                     exp_date = batch.expiration_date
                     if isinstance(exp_date, datetime):

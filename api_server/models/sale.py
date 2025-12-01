@@ -21,7 +21,6 @@ class SaleItem(EmbeddedDocument):
 
     def to_dict(self):
         return {
-            "id": self.id,
             "product_id": self.product_id,
             "quantity": self.quantity,
             "line_total": self.line_total
@@ -38,7 +37,7 @@ class Sale(BaseDocument):
     retailer_id = IntField(required=True)
     
     # when the sale happened
-    created_at = DateTimeField(default=lambda:datetime.now(timezone.utcnow))
+    created_at = DateTimeField(default=lambda: datetime.now(timezone.utcnow))
     
     # full sale amount
     total_amount = FloatField(default=0.0)

@@ -11,6 +11,9 @@ class ProductLog(BaseDocument):
 
     # product related to the log
     product_id = IntField(required=True)
+    
+    # number of stock added
+    quantity = IntField()
 
     # user who performed the action
     user = ReferenceField(User)
@@ -31,6 +34,7 @@ class ProductLog(BaseDocument):
         return {
             'id': self.id,
             'product_id': self.product_id,
+            'quantity': self.quantity,
             'user_id': self.user.id if self.user else None,
             'user_name': self.user.full_name if self.user else "System",
             'action_type': self.action_type,

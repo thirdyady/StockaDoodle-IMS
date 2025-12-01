@@ -33,6 +33,11 @@ class Product(BaseDocument):
         from .stock_batch import StockBatch
         # this adds all batch quantities together
         return sum((batch.quantity or 0) for batch in StockBatch.objects(product_id=self.id))
+    
+    @property
+    def category(self):
+        from .category import Category
+        return Category.objects(id=self.category_id).first()
 
     def to_dict(self, include_image=False, include_batches=False):
         data = {

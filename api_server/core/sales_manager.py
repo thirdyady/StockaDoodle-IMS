@@ -50,7 +50,7 @@ class SalesManager:
             for item in items:
                 InventoryManager.deduct_stock_fefo(
                     product_id=item['product_id'],
-                    qty_needed=item['quantity']
+                    qty_needed=item['quantity'],
                 )
 
             # Phase 3: Create sale record
@@ -64,7 +64,6 @@ class SalesManager:
             # Phase 4: Create sale items
             for item in items:
                 sale_item = SaleItem(
-                    id=get_next_sequence('saleitem'),     
                     product_id=item['product_id'],
                     quantity=item['quantity'],
                     line_total=item['line_total']
@@ -77,10 +76,12 @@ class SalesManager:
             SalesManager._update_retailer_metrics(retailer_id, total_amount)
 
             # Phase 6: Log the transaction
-            product_names = [
-                Product.objects(id=item['product_id']).first().name 
-                for item in items
-                ]
+            product_names = []
+            for item in items:
+                product = Product.objects(id=item['product_id']).first()
+                if product:
+                    product_names.append(product.name)
+
             ActivityLogger.log_api_activity(
                 method='POST',
                 target_entity='sale',
@@ -164,11 +165,14 @@ class SalesManager:
         try:
             # Restore stock for each item (add back as new batches)
             for item in sale.items:
-                InventoryManager.add_stock_batch(
+                from models.stock_batch import StockBatch
+                batch = StockBatch(
                     product_id=item.product_id,
                     quantity=item.quantity,
-                    user_id=user_id
+                    user_id=user_id,
+                    reason="Sale reversal"
                 )
+            batch.save()
 
             # Adjust retailer metrics
             metrics = RetailerMetrics.objects(retailer=sale.retailer_id).first()
@@ -260,11 +264,15 @@ class SalesManager:
         Returns:
             dict: Retailer performance data
         """
-        metrics = RetailerMetrics.objects(retailer=retailer_id).first()
+        from models.user import User
+        user = User.objects(id=retailer_id).first()
+        if not user:
+            raise SalesError(f"Retailer ID {retailer_id} not found")
+        metrics = RetailerMetrics.objects(retailer=user).first()
         
         if not metrics:
             return {
-                'retailer_id': retailer_id,
+                'retailer_id': user.id if user else retailer_id,
                 'current_streak': 0,
                 'daily_quota': 1000.0,
                 'sales_today': 0.0,
@@ -311,7 +319,7 @@ class SalesManager:
             user = User.objects(id=metrics.retailer).first()
             leaderboard.append({
                 'rank': idx,
-                'retailer_id': metrics.retailer_id,
+                'retailer_id': metrics.retailer.id if metrics.retailer else None,
                 'retailer_name': user.full_name if user else 'Unknown',
                 'current_streak': metrics.current_streak,
                 'total_sales': metrics.total_sales,
@@ -339,10 +347,12 @@ class SalesManager:
         if new_quota < 0:
             raise SalesError("Quota must be non-negative")
         
-        metrics = RetailerMetrics.objects(retailer=retailer_id).first()
-        
-        if not metrics:
+        from models.user import User
+        user = User.objects(id=retailer_id).first()
+    
+        if not user:
             raise SalesError(f"Retailer ID {retailer_id} not found")
+        metrics = RetailerMetrics.objects(retailer=user).first()
         
         old_quota = metrics.daily_quota
         metrics.daily_quota = new_quota

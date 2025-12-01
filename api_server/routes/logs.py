@@ -93,9 +93,7 @@ def dispose_product():
         # Deduct stock using FEFO
         InventoryManager.deduct_stock_fefo(
             product_id=product_id,
-            qty_needed=quantity,
-            user_id=user_id,
-            reason="Dispose"
+            qty_needed=quantity
         )
         
         # Log the disposal

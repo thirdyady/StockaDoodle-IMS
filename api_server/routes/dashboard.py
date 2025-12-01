@@ -83,7 +83,7 @@ def retailer_dashboard(user_id):
     """Retailer Dashboard Metrics"""
     try:
         # Verify user exists and is a retailer
-        user = User.objects(user_id=user_id).first()
+        user = User.objects(id=user_id).first()
         if not user:
             return jsonify({"errors": ["User not found"]}), 404
         
@@ -91,10 +91,11 @@ def retailer_dashboard(user_id):
             return jsonify({"errors": ["User is not a retailer"]}), 403
         
         # Get available products count
-        available_products = Product.objects(stock_level___gt=0).count()
+        all_products = Product.objects()
+        available_products = sum(1 for p in all_products if p.stock_level > 0)
         
         # Get retailer metrics
-        metrics = RetailerMetrics.objects(retailer=user_id).first()
+        metrics = RetailerMetrics.objects(retailer=user).first()
         
         if not metrics:
             return jsonify({

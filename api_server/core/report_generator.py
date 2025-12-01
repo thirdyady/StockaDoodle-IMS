@@ -45,11 +45,11 @@ class ReportGenerator:
 
         results = []
         for sale in sales:
-            retailer = User.objects(id=sale.retailer).first()
+            retailer = User.objects(id=sale.retailer_id).first()
             items = SaleItem.objects(sale=sale.id)
             
             for item in items:
-                product = Product.objects(id=item.product).first()
+                product = Product.objects(id=item.product_id).first()
                 results.append({
                     'sale_id': sale.id,
                     'date': sale.created_at.isoformat(),
@@ -98,9 +98,9 @@ class ReportGenerator:
 
         category_data = []
         for category in categories:
-            products = Product.objects(category=category.id)
+            products = Product.objects(category_id=category.id)
             products_count = products.count()
-            category_stock = sum(product.stock_level for product in products)
+            category_stock = sum(p.stock_level for p in products)
             percentage = (category_stock / total_stock * 100) if total_stock > 0 else 0
 
             category_data.append({
@@ -136,7 +136,7 @@ class ReportGenerator:
         
         performance_data = []
         for retailer in retailers:
-            metrics = RetailerMetrics.objects(retailer=retailer.id).first()
+            metrics = RetailerMetrics.objects(retailer=retailer).first()
             
             if metrics:
                 quota_progress = (metrics.sales_today / metrics.daily_quota * 100) if metrics.daily_quota > 0 else 0
@@ -196,7 +196,7 @@ class ReportGenerator:
 
             # Expiration check
             expiring_batches = StockBatch.objects(
-                product=product.id,
+                product=product,
                 expiration_date__lte=cutoff_date,
                 expiration_date__ne=None,
                 quantity__gt=0

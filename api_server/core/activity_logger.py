@@ -10,7 +10,7 @@ class ActivityLogger:
     """
 
     @staticmethod
-    def log_product_action(product_id, user_id, action_type, notes=None):
+    def log_product_action(product_id, user_id, action_type, quantity=None, notes=None):
         """
         Log a product-related action (restock, dispose, edit, etc.)
         
@@ -27,7 +27,7 @@ class ActivityLogger:
             product_id=product_id,
             user=user_id,
             action_type=action_type,
-            notes=notes,
+            notes=f"Quantity: {quantity}. {notes}" if quantity else notes,
             log_time=datetime.now(timezone.utc)
         )
         log.save()

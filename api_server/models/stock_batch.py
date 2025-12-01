@@ -1,6 +1,7 @@
 from .base import BaseDocument
 from mongoengine import IntField, DateField, DateTimeField, StringField, ReferenceField
 from .user import User
+from .product import Product
 from datetime import datetime
 
 class StockBatch(BaseDocument):
@@ -10,7 +11,7 @@ class StockBatch(BaseDocument):
         }
 
     # product this batch belongs to
-    product_id = IntField(required=True)
+    product = ReferenceField(Product)
 
     # how many items inside this batch
     quantity = IntField(required=True, default=0)
@@ -30,10 +31,10 @@ class StockBatch(BaseDocument):
     def to_dict(self):
         return {
             "id": self.id,
-            "product_id": self.product_id,
+            "product_id": self.product_id if self.product else None,
             "quantity": self.quantity,
             "expiration_date": self.expiration_date.isoformat() if self.expiration_date else None,
             "added_at": self.added_at.isoformat() if self.added_at else None,
-            "added_by": self.added_by.id if self.added_by else None,
+            "added_by": self.added_by.full_name if self.added_by else "Unknown",
             "reason": self.reason
         }
