@@ -36,8 +36,8 @@ class AppConfig:
     
     # --- Accent Colors ---
     # Used for primary actions, success/error indicators, and warnings.
-    PRIMARY_COLOR = "#6C5CE7"     # Vibrant purple/blue for main actions, highlights
-    PRIMARY_HOVER = "#5A4FCF"     # Darker purple on hover
+    PRIMARY_COLOR = "#2563EB"     # Blue for main actions, highlights (matches logo)
+    PRIMARY_HOVER = "#1D4ED8"     # Darker blue on hover
     SECONDARY_COLOR = "#00B894"   # Teal/green for success, positive indicators
     ACCENT_COLOR = "#D63031"      # Red for errors, critical alerts
     WARNING_COLOR = "#FDCB6E"     # Yellow/orange for warnings, low stock
@@ -71,7 +71,7 @@ class AppConfig:
     
     # --- File Paths ---
     # Defines directories for assets and data storage.
-    ASSETS_DIR = "assets"
+    ASSETS_DIR = "../desktop_app/assets"
     ICONS_DIR = os.path.join(ASSETS_DIR, "icons")
     IMAGES_DIR = os.path.join(ASSETS_DIR, "images")
     PRODUCT_IMAGE_DIR = os.path.join(ASSETS_DIR, "product_images")
