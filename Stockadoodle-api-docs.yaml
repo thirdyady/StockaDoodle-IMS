@@ -1,0 +1,1099 @@
+﻿openapi: 3.0.0
+info:
+  title: StockaDoodle Inventory Management API
+  description: >
+    RESTful API for the StockaDoodle desktop inventory management system. This
+    documentation describes the local API instance running at each individual
+    QuickMart store (e.g., Quezon City, Makati, Taguig) which uses Flask + MongoDB (MongoEngine) implementation. 
+
+    The system supports inventory tracking (FEFO), sales, role-based users, reporting and audit trailing.
+  version: v2
+servers:
+  - url: 'http://127.0.0.1:5000/api/v1'
+    description: Local Flask API Server for the current store location
+
+tags:
+  - name: General
+    description: Health checks and root info
+  - name: Dashboard
+    description: Role-specific dashboard metrics
+  - name: Products
+    description: Product management and Stock Batches
+  - name: Categories
+    description: Product categories
+  - name: Sales
+    description: Transaction processing and history
+  - name: Logs
+    description: Activity logging and disposal
+  - name: Reports
+    description: System reports and PDF exports
+  - name: Users
+    description: User management and Authentication
+  - name: Metrics
+    description: Retailer performance and Leaderboards
+  - name: Notifications
+    description: Email alerts for low stock and expiration
+
+paths:
+  # ===========================
+  # GENERAL
+  # ===========================
+  /:
+    get:
+      tags: [General]
+      summary: API Root
+      responses:
+        '200':
+          description: API Status info
+  
+  /health:
+    get:
+      tags: [General]
+      summary: Health Check
+      responses:
+        '200':
+          description: Service is healthy
+
+  # ===========================
+  # DASHBOARD
+  # ===========================
+  /dashboard/admin:
+    get:
+      tags: [Dashboard]
+      summary: Admin Metrics
+      responses:
+        '200':
+          description: Total users, products, sales, and revenue.
+
+  /dashboard/manager:
+    get:
+      tags: [Dashboard]
+      summary: Manager Metrics
+      responses:
+        '200':
+          description: Low stock counts, expiring items, recent logs.
+
+  /dashboard/retailer/{user_id}:
+    get:
+      tags: [Dashboard]
+      summary: Retailer Metrics
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Personal sales stats, streaks, and quota progress.
+
+  # ===========================
+  # PRODUCTS
+  # ===========================
+  /products:
+    get:
+      tags: [Products]
+      summary: List products with filtering and pagination
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            default: id
+        - name: sort_dir
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+        - name: search_mode
+          in: query
+          schema:
+            type: string
+            enum: [AND, OR]
+            default: AND
+        - name: name
+          in: query
+          schema:
+            type: string
+        - name: brand
+          in: query
+          schema:
+            type: string
+        - name: category_id
+          in: query
+          schema:
+            type: integer
+        - name: include_image
+          in: query
+          schema:
+            type: boolean
+        - name: price_gt
+          in: query
+          description: Price greater than
+          schema:
+            type: integer
+        - name: price_lte
+          in: query
+          description: Price less than or equal to
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated list of products
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  products:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Product'
+                  total:
+                    type: integer
+                  pages:
+                    type: integer
+
+    post:
+      tags: [Products]
+      summary: Create new product
+      description: Supports multipart/form-data for image upload. Can optionally create initial stock batch.
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProductCreate'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductCreate'
+      responses:
+        '201':
+          description: Product created
+
+  /products/{id}:
+    get:
+      tags: [Products]
+      summary: Get single product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: include_image
+          in: query
+          schema:
+            type: boolean
+        - name: include_batches
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Product details
+    
+    put:
+      tags: [Products]
+      summary: Replace product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProductCreate'
+      responses:
+        '200':
+          description: Product replaced
+    
+    patch:
+      tags: [Products]
+      summary: Update product details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                price: 
+                  type: integer
+                stock_level:
+                  type: integer
+                  description: Adds a new batch if provided
+      responses:
+        '200':
+          description: Product updated
+    
+    delete:
+      tags: [Products]
+      summary: Delete product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id:
+                  type: integer
+      responses:
+        '200':
+          description: Product deleted
+
+  # Stock Batches Sub-routes
+  /products/{product_id}/stock_batches:
+    get:
+      tags: [Products]
+      summary: List batches for product
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of batches
+    
+    post:
+      tags: [Products]
+      summary: Add stock batch
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockBatchInput'
+      responses:
+        '201':
+          description: Batch added
+
+  /products/{product_id}/stock_batches/{batch_id}:
+    patch:
+      tags: [Products]
+      summary: Remove stock quantity from specific batch
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quantity]
+              properties:
+                quantity:
+                  type: integer
+                reason:
+                  type: string
+                user_id:
+                  type: integer
+      responses:
+        '200':
+          description: Stock deducted
+    
+    delete:
+      tags: [Products]
+      summary: Delete batch completely
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Batch deleted
+
+  # ===========================
+  # CATEGORIES
+  # ===========================
+  /categories:
+    get:
+      tags: [Categories]
+      summary: List categories
+      parameters:
+        - name: include_image
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: List of categories
+    
+    post:
+      tags: [Categories]
+      summary: Create category
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: 
+                  type: string
+                description:
+                  type: string
+                image:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Category created
+
+  /categories/{cat_id}:
+    get:
+      tags: [Categories]
+      parameters:
+        - name: cat_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Category details
+    delete:
+      tags: [Categories]
+      parameters:
+        - name: cat_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Deleted
+        '400':
+          description: Cannot delete if products linked
+
+  # ===========================
+  # SALES
+  # ===========================
+  /sales:
+    post:
+      tags: [Sales]
+      summary: Record Atomic Sale
+      description: Deducts stock using FEFO logic. All items succeed or fail together.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaleInput'
+      responses:
+        '201':
+          description: Sale recorded
+    
+  /sales/{sale_id}:
+    get:
+      tags: [Sales]
+      parameters:
+        - name: sale_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Sale details
+    
+    delete:
+      tags: [Sales]
+      summary: Undo Sale
+      parameters:
+        - name: sale_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id:
+                  type: integer
+      responses:
+        '200':
+          description: Sale undone and stock restored
+
+  /sales/reports:
+    get:
+      tags: [Sales]
+      summary: Sales history report
+      parameters:
+        - name: start
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: retailer_id
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Sales report data
+
+  # ===========================
+  # LOGS & DISPOSAL
+  # ===========================
+  /log:
+    get:
+      tags: [Logs]
+      summary: Get system logs
+      parameters:
+        - name: action_type
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: List of logs
+
+  /log/product/{product_id}:
+    get:
+      tags: [Logs]
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Product history
+
+  /log/dispose:
+    post:
+      tags: [Logs]
+      summary: Dispose Product (Stock Deduction)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_id, user_id, quantity]
+              properties:
+                product_id:
+                  type: integer
+                user_id:
+                  type: integer
+                quantity:
+                  type: integer
+                notes:
+                  type: string
+      responses:
+        '201':
+          description: Product disposed
+
+  /log/desktop:
+    post:
+      tags: [Logs]
+      summary: Log action from Desktop App
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action_type]
+              properties:
+                action_type:
+                  type: string
+                user_id:
+                  type: integer
+                details:
+                  type: string
+      responses:
+        '201':
+          description: Logged
+
+  # ===========================
+  # REPORTS & PDF
+  # ===========================
+  /reports/sales-performance:
+    get:
+      tags: [Reports]
+      summary: Sales Performance Data
+      parameters:
+        - name: start_date
+          in: query
+          schema:
+             type: string
+             format: date
+        - name: end_date
+          in: query
+          schema:
+             type: string
+             format: date
+      responses:
+        '200':
+          description: JSON Report
+  
+  /reports/sales-performance/pdf:
+    get:
+      tags: [Reports]
+      summary: Sales Performance PDF
+      parameters:
+        - name: start_date
+          in: query
+          schema:
+             type: string
+             format: date
+        - name: end_date
+          in: query
+          schema:
+             type: string
+             format: date
+      responses:
+        '200':
+          description: PDF file download
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /reports/category-distribution:
+    get:
+      tags: [Reports]
+      responses:
+        '200':
+          description: Category Report
+  
+  /reports/category-distribution/pdf:
+    get:
+      tags: [Reports]
+      responses:
+        '200':
+          description: PDF file download
+
+  /reports/retailer-performance:
+    get:
+      tags: [Reports]
+      responses:
+        '200':
+          description: Retailer Report
+
+  /reports/retailer-performance/pdf:
+    get:
+      tags: [Reports]
+      responses:
+        '200':
+          description: PDF file download
+
+  /reports/alerts:
+    get:
+      tags: [Reports]
+      parameters:
+        - name: days_ahead
+          in: query
+          schema:
+            type: integer
+            default: 7
+      responses:
+        '200':
+          description: Low Stock/Expiry Report
+  
+  /reports/alerts/pdf:
+    get:
+      tags: [Reports]
+      parameters:
+        - name: days_ahead
+          in: query
+          schema:
+            type: integer
+            default: 7
+      responses:
+        '200':
+          description: PDF file download
+
+  /reports/managerial-activity:
+    get:
+      tags: [Reports]
+      responses:
+        '200':
+          description: Manager Actions Report
+
+  /reports/managerial-activity/pdf:
+    get:
+      tags: [Reports]
+      responses:
+        '200':
+          description: PDF file download
+
+  /reports/transactions:
+    get:
+      tags: [Reports]
+      responses:
+        '200':
+          description: Detailed Transactions
+
+  /reports/transactions/pdf:
+    get:
+      tags: [Reports]
+      responses:
+        '200':
+          description: PDF file download
+
+  /reports/user-accounts:
+    get:
+      tags: [Reports]
+      responses:
+        '200':
+          description: User List
+
+  /reports/user-accounts/pdf:
+    get:
+      tags: [Reports]
+      responses:
+        '200':
+          description: PDF file download
+
+  # ===========================
+  # USERS & AUTH
+  # ===========================
+  /users:
+    get:
+      tags: [Users]
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List users
+    post:
+      tags: [Users]
+      summary: Register new user
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [username, password, full_name, email]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                full_name:
+                  type: string
+                email:
+                  type: string
+                role:
+                  type: string
+                  enum: [admin, manager, staff, retailer]
+                image:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: User created
+
+  /users/{user_id}:
+    get:
+      tags: [Users]
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User details
+    put:
+      tags: [Users]
+      summary: Replace user details
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserInput'
+      responses:
+        '200':
+          description: Updated
+    delete:
+      tags: [Users]
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Deleted
+
+  /users/auth/login:
+    post:
+      tags: [Users]
+      summary: Authenticate User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+             application/json:
+               schema:
+                 type: object
+                 properties:
+                   message:
+                     type: string
+                   mfa_required:
+                     type: boolean
+                   user:
+                     $ref: '#/components/schemas/User'
+
+  /users/auth/mfa/send:
+    post:
+      tags: [Users]
+      summary: Send MFA Code
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, email]
+              properties:
+                username:
+                  type: string
+                email:
+                  type: string
+      responses:
+        '200':
+          description: Code sent
+
+  /users/auth/mfa/verify:
+    post:
+      tags: [Users]
+      summary: Verify MFA Code
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, code]
+              properties:
+                username:
+                  type: string
+                code:
+                  type: string
+      responses:
+        '200':
+          description: Code valid
+
+  /users/{user_id}/change-password:
+    post:
+      tags: [Users]
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [old_password, new_password]
+              properties:
+                old_password:
+                  type: string
+                new_password:
+                  type: string
+      responses:
+        '200':
+          description: Password changed
+
+  # ===========================
+  # METRICS & LEADERBOARD
+  # ===========================
+  /retailer/leaderboard:
+    get:
+      tags: [Metrics]
+      summary: Retailer Leaderboard
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Leaderboard data
+
+  /retailer/{user_id}/quota:
+    patch:
+      tags: [Metrics]
+      summary: Update Quota
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [daily_quota]
+              properties:
+                daily_quota:
+                  type: number
+                updated_by:
+                  type: integer
+      responses:
+        '200':
+          description: Quota updated
+
+  /retailer/reset-daily:
+    post:
+      tags: [Metrics]
+      summary: Reset all daily metrics
+      description: Usually run by system or admin at midnight
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [admin_id]
+              properties:
+                admin_id:
+                  type: integer
+      responses:
+        '200':
+          description: Reset complete
+
+  # ===========================
+  # NOTIFICATIONS
+  # ===========================
+  /notifications/low-stock:
+    post:
+      tags: [Notifications]
+      summary: Trigger Low Stock Emails
+      responses:
+        '200':
+          description: Emails sent
+
+  /notifications/expiring:
+    post:
+      tags: [Notifications]
+      summary: Trigger Expiration Emails
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                days_ahead:
+                  type: integer
+                  default: 7
+      responses:
+        '200':
+          description: Emails sent
+
+  /notifications/daily-summary:
+    post:
+      tags: [Notifications]
+      summary: Trigger Daily Summary Email
+      responses:
+        '200':
+          description: Email sent
+
+components:
+  schemas:
+    Product:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        brand:
+          type: string
+        price:
+          type: integer
+        category:
+          type: string
+        stock_level:
+          type: integer
+        min_stock_level:
+          type: integer
+        has_image:
+          type: boolean
+        details:
+          type: string
+
+    ProductCreate:
+      type: object
+      required: [name, price]
+      properties:
+        name:
+          type: string
+        brand:
+          type: string
+        price:
+          type: integer
+        category_id:
+          type: integer
+        min_stock_level:
+          type: integer
+        stock_level:
+          type: integer
+          description: Initial stock quantity
+        expiration_date:
+          type: string
+          format: date
+          description: For initial stock only
+        image:
+          type: string
+          format: binary
+        details:
+          type: string
+        added_by:
+          type: integer
+
+    StockBatchInput:
+      type: object
+      required: [quantity, expiration_date]
+      properties:
+        quantity:
+          type: integer
+        expiration_date:
+          type: string
+          format: date
+        added_by:
+          type: integer
+        reason:
+          type: string
+
+    SaleInput:
+      type: object
+      required: [retailer_id, items, total_amount]
+      properties:
+        retailer_id:
+          type: integer
+        total_amount:
+          type: number
+        items:
+          type: array
+          items:
+            type: object
+            required: [product_id, quantity, line_total]
+            properties:
+              product_id:
+                type: integer
+              quantity:
+                type: integer
+              line_total:
+                type: number
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        full_name:
+          type: string
+        role:
+          type: string
+        email:
+          type: string
+        has_image:
+          type: boolean
+
+    UserInput:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        full_name:
+          type: string
+        role:
+          type: string
+        email:
+          type: string
