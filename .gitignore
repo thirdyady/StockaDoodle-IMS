@@ -1,0 +1,17 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+.env
+*.env
+
+venv/
+.venv/
+
+.vscode/
+.idea/
+
+api_server/seeds.py
+
+*.db
