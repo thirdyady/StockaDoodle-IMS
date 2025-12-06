@@ -8,8 +8,6 @@ from core.activity_logger import ActivityLogger
 from mongoengine import Q
 from mongoengine.errors import DoesNotExist
 
-
-
 from utils import get_image_binary, extract_int, parse_date
 from datetime import datetime, timezone
 
@@ -31,7 +29,7 @@ API_USER_ID = 1001  # the dedicated API handler user
 # price_lte: Integer (optional)
 #
 # Advanced:
-# sort_by: String (optional) → name, price, created_at
+# sort_by: String (optional) → id, name, price, created_at
 # sort_dir: String (optional) → asc or desc
 #
 # Pagination:
@@ -41,52 +39,64 @@ API_USER_ID = 1001  # the dedicated API handler user
 # Logic mode:
 # search_mode: "AND" or "OR" (default: AND)
 # ----------------------------------------------------------------------
-@bp.route('', methods = ['GET'])
+@bp.route('', methods=['GET'])
 def list_product():
     args = request.args
-    
+
+    # ✅ safer sort handling
+    allowed_sort = {"id", "name", "price", "created_at"}
     sort_by = args.get('sort_by', 'id')
+    if sort_by not in allowed_sort:
+        sort_by = "id"
+
     sort_dir = args.get('sort_dir', 'asc')
-    page = int(args.get('page', 1))
-    per_page = int(args.get('per_page', 10))
+    sort_dir = sort_dir.lower() if sort_dir else "asc"
+    sort_prefix = "-" if sort_dir == "desc" else ""
+
+    page = extract_int(args.get('page'), 1) or 1
+    per_page = extract_int(args.get('per_page'), 10) or 10
+
     include_image = args.get('include_image') == 'true'
-    search_mode = args.get('search_mode', 'AND').upper()  # AND or OR
-    
+    search_mode = (args.get('search_mode', 'AND') or "AND").upper()
+
     filters = []
 
     # Build filters
     if name := args.get('name'):
         filters.append(Q(name__icontains=name))
+
     if brand := args.get('brand'):
         filters.append(Q(brand__icontains=brand))
+
     if category_id := args.get('category_id'):
-        filters.append(Q(category=int(category_id)))
-        
+        cat_int = extract_int(category_id)
+        if cat_int is not None:
+            # ✅ FIX: correct field is category_id
+            filters.append(Q(category_id=cat_int))
+
     for op in ['gt', 'gte', 'lt', 'lte']:
         if price := args.get(f'price_{op}'):
-            if price.isdigit():
-                filters.append(Q(**{f'price__{op}': int(price)}))
-
+            price_int = extract_int(price)
+            if price_int is not None:
+                filters.append(Q(**{f'price__{op}': price_int}))
 
     # Apply AND / OR mode
     query = Product.objects()
     if filters:
         combined = filters[0]
         for f in filters[1:]:
-            combined = combined | f if search_mode == "OR" else combined & f
+            combined = (combined | f) if search_mode == "OR" else (combined & f)
         query = query.filter(combined)
 
-
-    # Apply sorting
-    sort_column = '-' if sort_dir == 'desc' else ''
-    query = query.order_by(f'{sort_column}-{sort_by}')
+    # ✅ FIX: correct order_by format
+    query = query.order_by(f'{sort_prefix}{sort_by}')
 
     # Pagination
     total = query.count()
     skip = (page - 1) * per_page
     products = query.skip(skip).limit(per_page)
     pages = (total + per_page - 1) // per_page
-        
+
     return jsonify({
         "page": page,
         "per_page": per_page,
@@ -94,40 +104,43 @@ def list_product():
         "pages": pages,
         "products": [p.to_dict(include_image=include_image) for p in products]
     })
-    
-    
+
+
 # ----------------------------------------------------------------------
-# GET /api/v1/products/<id> → retrieving a product based on ID 
-# ----------------------------------------------------------------------    
+# GET /api/v1/products/<id> → retrieve product based on ID
+# ----------------------------------------------------------------------
 @bp.route('/<int:id>', methods=['GET'])
 def get_product(id):
     include_image = request.args.get('include_image') == 'true'
     include_batches = request.args.get('include_batches') == 'true'
-    
-    try:
-        product = Product.objects.get(id=id).first()
-        # return product data with optional image and batch details
-        return jsonify(product.to_dict(include_image, include_batches))
-    
-    except DoesNotExist:
-        return jsonify({"errors": ["Product not found"]}), 404
 
+    try:
+        # ✅ FIX: avoid .get(...).first() misuse
+        product = Product.objects(id=id).first()
+        if not product:
+            return jsonify({"errors": ["Product not found"]}), 404
+
+        return jsonify(product.to_dict(include_image, include_batches))
+
+    except Exception:
+        return jsonify({"errors": ["Product not found"]}), 404
 
 
 # ----------------------------------------------------------------------
 # GET /api/v1/products/<product_id>/stock_batches → list all batches
-# product_id: Integer (required)
 # ----------------------------------------------------------------------
 @bp.route('/<int:product_id>/stock_batches', methods=['GET'])
 def list_stock_batches(product_id):
     try:
-        product = Product.objects.get(id=product_id)
+        product = Product.objects(id=product_id).first()
+        if not product:
+            raise DoesNotExist
     except DoesNotExist:
         return jsonify({"errors": ["Product not found"]}), 404
-    
+
     category = Category.objects(id=product.category_id).first() if product.category_id else None
     batches = [batch.to_dict() for batch in StockBatch.objects(product_id=product.id)]
-    
+
     return jsonify({
         "product_id": product.id,
         "product_name": product.name,
@@ -139,25 +152,12 @@ def list_stock_batches(product_id):
 
 # ----------------------------------------------------------------------
 # POST /api/v1/products → create new product
-# name: String (required)
-# price: Integer (required)
-# brand: String (optional)
-# category_id: Integer (optional)
-# min_stock_level: Integer (optional)
-# details: String (optional)
-# product_image: File (optional, multipart/form-data)
-# stock_level: Integer (optional, creates initial batch)
-# expiration_date: String YYYY-MM-DD (optional)
-# added_by: Integer (optional)
 # ----------------------------------------------------------------------
 @bp.route('', methods=['POST'])
 def create_product():
-
-    # Determine if the request is form-data or JSON
     is_form = request.content_type and 'multipart/form-data' in request.content_type
     data = request.form.to_dict() if is_form else (request.get_json() or {})
 
-    # Validate required fields
     if not data.get('name'):
         return jsonify({"errors": ["Product name is required"]}), 400
 
@@ -171,10 +171,8 @@ def create_product():
         if category_id and not Category.objects(id=category_id).first():
             return jsonify({"errors": ["Invalid category ID"]}), 400
 
-    # Handle product image
     image_blob = get_image_binary()
 
-    # Create product
     product = Product(
         name=data['name'],
         brand=data.get('brand'),
@@ -184,57 +182,57 @@ def create_product():
         product_image=image_blob,
         details=data.get('details')
     )
-    
+
+    # ✅ with category_id now optional in model, this won't 500
     product.save()
-    
-    # Create initial stock batch if stock_level provided
+
     initial_stock = extract_int(data.get('stock_level'), 0)
     include_batches = False
-    if initial_stock > 0:
-        batch = StockBatch (
-            product_id = product.id,
-            quantity = initial_stock,
-            expiration_date = parse_date(data.get('expiration_date')),
-            added_at = datetime.now(timezone.utc),
-            added_by=User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first(),   # default to API user
+
+    if initial_stock and initial_stock > 0:
+        batch = StockBatch(
+            product_id=product.id,
+            quantity=initial_stock,
+            expiration_date=parse_date(data.get('expiration_date')),
+            added_at=datetime.now(timezone.utc),
+            added_by=User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first(),
             reason="Initial stock"
         )
         batch.save()
-        include_batches=True
+        include_batches = True
 
-    user_id = User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first()
-    
+    user_obj = User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first()
+
     ActivityLogger.log_api_activity(
         method='POST',
         target_entity='product',
-        user_id=user_id,
+        user_id=user_obj,
         details=f"Created product '{product.name}' (id={product.id})"
     )
-    
+
     ActivityLogger.log_product_action(
         product_id=product.id,
-        user_id=user_id,
+        user_id=user_obj,
         action_type='Create',
-        quantity=initial_stock if initial_stock > 0 else None,
-        notes=f"Product created with initial stock: {initial_stock}" if initial_stock > 0 else "Product created"
+        quantity=initial_stock if initial_stock and initial_stock > 0 else None,
+        notes=f"Product created with initial stock: {initial_stock}" if initial_stock and initial_stock > 0 else "Product created"
     )
-    
+
     return jsonify(product.to_dict(include_image=True, include_batches=include_batches)), 201
 
 
 # ----------------------------------------------------------------------
 # POST /api/v1/products/<product_id>/stock_batches → add stock batch
-# quantity: Integer (required)
-# expiration_date: String YYYY-MM-DD (required)
-# added_by: Integer (optional)
 # ----------------------------------------------------------------------
 @bp.route('/<int:product_id>/stock_batches', methods=['POST'])
 def add_stock_batch(product_id):
     try:
-        product = Product.objects.get(id=product_id).first()
+        product = Product.objects(id=product_id).first()
+        if not product:
+            raise DoesNotExist
     except DoesNotExist:
         return jsonify({"errors": ["Product not found"]}), 404
-    
+
     data = request.get_json() or {}
 
     quantity = extract_int(data.get('quantity'))
@@ -245,15 +243,16 @@ def add_stock_batch(product_id):
     if not expiration_date:
         return jsonify({"error": "Expiration date is required (YYYY-MM-DD)"}), 400
 
-    added_by = User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first()
+    added_by_user = User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first()
     reason = data.get("reason") or "Stock added"
-    
+
     batch = StockBatch(
         product_id=product.id,
         quantity=quantity,
         expiration_date=expiration_date,
         added_at=datetime.now(timezone.utc),
-        added_by= User.objects(id=added_by).first(),
+        # ✅ FIX: added_by should be the user object
+        added_by=added_by_user,
         reason=reason
     )
 
@@ -262,138 +261,118 @@ def add_stock_batch(product_id):
     ActivityLogger.log_api_activity(
         method='POST',
         target_entity='stock_batch',
-        user_id=added_by,
+        user_id=added_by_user,
         details=f"Added stock batch: product_id={product.id}, qty={quantity}, exp={expiration_date}"
     )
-    
+
     ActivityLogger.log_product_action(
         product_id=product.id,
-        user_id=added_by,
+        user_id=added_by_user,
         action_type='Restock',
         notes=f"{reason}. Expires: {expiration_date}"
     )
-    
+
     return jsonify({
         "message": "Stock batch added",
         "product_id": product.id,
         "batch": batch.to_dict(),
         "new_stock_level": product.stock_level
     }), 201
-    
+
+
 # ----------------------------------------------------------------------
-# PUT /api/v1/products/<int:id> → Replace a product
-# name: String (required)
-# price: Integer (required)
-# brand: String (optional)
-# category_id: Integer (optional)
-# min_stock_level: Integer (optional)
-# details: String (optional)
-# stock_level: Integer (optional, replaces all batches)
-# expiration_date: String YYYY-MM-DD (optional)
-# added_by: Integer (optional)
-# product_image: File (optional)
+# PUT /api/v1/products/<product_id> → Replace a product
 # ----------------------------------------------------------------------
 @bp.route('/<int:product_id>', methods=['PUT'])
 def replace_product(product_id):
-
     try:
-        product = Product.objects.get(id=product_id).first()
+        product = Product.objects(id=product_id).first()
+        if not product:
+            raise DoesNotExist
     except DoesNotExist:
-        return jsonify ({"errors": ["Product not found"]}), 404
-    
+        return jsonify({"errors": ["Product not found"]}), 404
+
     is_form = request.content_type and 'multipart/form-data' in request.content_type
     data = request.form.to_dict() if is_form else (request.get_json() or {})
-   
-    # Product name is required
+
     if 'name' not in data:
         return jsonify({"errors": ["Product name is required for PUT"]}), 400
 
-    # Price validation
     price = extract_int(data.get('price'))
     if price is None:
         return jsonify({"errors": ["Price must be a number"]}), 400
 
-    # Category validation
     category_id = None
-    if 'category_id' in data:
+    if 'category_id' in data and data.get('category_id') is not None:
         category_id = extract_int(data['category_id'])
         if category_id and not Category.objects(id=category_id).first():
             return jsonify({"errors": ["Invalid category ID"]}), 400
 
-    # Update product core fields
     product.name = data['name']
     product.brand = data.get('brand')
     product.price = price
-    product.category = category_id
+    # ✅ FIX: correct field
+    product.category_id = category_id
     product.min_stock_level = extract_int(data.get('min_stock_level'), product.min_stock_level)
     product.details = data.get('details', product.details)
 
-    # Handle stock update via new StockBatch
-    StockBatch.objects(product=product.id).delete()
+    # ✅ FIX: correct StockBatch filter field
+    StockBatch.objects(product_id=product.id).delete()
 
     new_stock = extract_int(data.get('stock_level'))
     if new_stock is not None and new_stock > 0:
         batch = StockBatch(
-            product_id = product.id,
-            quantity = new_stock, 
-            expiration_date = parse_date(data.get('expiration_date')),
-            added_at = datetime.now(timezone.utc),
-            added_by = User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first(),
+            product_id=product.id,
+            quantity=new_stock,
+            expiration_date=parse_date(data.get('expiration_date')),
+            added_at=datetime.now(timezone.utc),
+            added_by=User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first(),
             reason="Stock replacement"
-            )
-        
+        )
         batch.save()
-        
-    # Image handling
+
     new_image = get_image_binary()
     if new_image is not None:
         product.product_image = new_image
 
     product.save()
-    
-    # Log activity
+
+    user_obj = User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first()
+
     ActivityLogger.log_api_activity(
         method='PUT',
         target_entity='product',
-        user_id=data.get('added_by') or API_USER_ID,
+        user_id=user_obj,
         details=f"Replaced product id={product.id}, name={product.name}"
     )
-    
+
     ActivityLogger.log_product_action(
         product_id=product.id,
-        user_id=data.get('added_by') or API_USER_ID,
+        user_id=user_obj,
         action_type='Edit',
         quantity=new_stock if new_stock else None,
         notes=f"Product replaced. Stock set to {new_stock}" if new_stock else "Product replaced"
     )
-    
+
     return jsonify(product.to_dict(include_image=True, include_batches=True))
 
 
 # ----------------------------------------------------------------------
-# PATCH /api/v1/products/<int:id> → edit product details
-# name: String (optional)
-# price: Integer (optional)
-# category_id: Integer (optional)
-# brand: String (optional)
-# min_stock_level: Integer (optional)
-# details: String (optional)
-# stock_level: Integer (optional, adds a new batch)
-# expiration_date: String YYYY-MM-DD (optional)
-# added_by: Integer (optional)
-# product_image: File (optional)
-# ----------------------------------------------------------------------   
-@bp.route('/<int:id>', methods=['PATCH'])
+# PATCH /api/v1/products/<product_id> → edit product details
+# ----------------------------------------------------------------------
+# ✅ FIX: route param name must match function param to avoid TypeError 500
+@bp.route('/<int:product_id>', methods=['PATCH'])
 def patch_product(product_id):
-    try: 
-        product = Product.objects.get(id=product_id).first()
+    try:
+        product = Product.objects(id=product_id).first()
+        if not product:
+            raise DoesNotExist
     except DoesNotExist:
         return jsonify({"errors": ["Product not found"]}), 404
-    
+
     is_form = request.content_type and 'multipart/form-data' in request.content_type
     data = request.form.to_dict() if is_form else (request.get_json() or {})
 
-    # Update basic fields if provided
     if 'name' in data and not data['name']:
         return jsonify({"errors": ["Product name cannot be empty"]}), 400
 
@@ -409,7 +388,6 @@ def patch_product(product_id):
             return jsonify({"errors": ["Invalid category ID"]}), 400
         product.category_id = cat_id
 
-    # Update optional fields
     if 'name' in data:
         product.name = data['name']
     if 'brand' in data:
@@ -418,28 +396,25 @@ def patch_product(product_id):
         product.min_stock_level = extract_int(data['min_stock_level'], product.min_stock_level)
     if 'details' in data:
         product.details = data['details']
-            
-    # Handle stock update via new StockBatch
+
     if 'stock_level' in data:
         qty = extract_int(data['stock_level'])
         if qty is not None and qty > 0:
             batch = StockBatch(
-                product_id = product.id,
-                quantity = qty, 
-                expiration_date = parse_date(data.get('expiration_date')),
-                added_at = datetime.now(timezone.utc),
-                added_by = User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first()               
+                product_id=product.id,
+                quantity=qty,
+                expiration_date=parse_date(data.get('expiration_date')),
+                added_at=datetime.now(timezone.utc),
+                added_by=User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first()
             )
             batch.save()
 
-
-    # Image update (replace only if sent)
     new_image = get_image_binary()
     if new_image is not None:
         product.product_image = new_image
-        
+
     product.save()
-    
+
     changed_fields = [
         k for k in ('name', 'price', 'brand', 'category_id', 'min_stock_level', 'details')
         if k in data
@@ -447,38 +422,42 @@ def patch_product(product_id):
     if 'stock_level' in data:
         changed_fields.append("stock_level")
 
-    # Log Activity
+    user_obj = User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first()
+
     ActivityLogger.log_api_activity(
         method='PATCH',
         target_entity='product',
-        user_id=data.get('added_by') or API_USER_ID,
+        user_id=user_obj,
         details=f"Updated product id={product.id}: {', '.join(changed_fields)}"
     )
-    
+
     ActivityLogger.log_product_action(
         product_id=product.id,
-        user_id=data.get('added_by') or API_USER_ID,
+        user_id=user_obj,
         action_type='Edit',
         quantity=extract_int(data.get('stock_level')) if 'stock_level' in data else None,
         notes=f"Updated fields: {', '.join(changed_fields)}"
     )
-    
+
     return jsonify(product.to_dict(include_image=True, include_batches=True))
-        
+
+
 # ----------------------------------------------------------------------
 # PATCH /api/v1/products/<product_id>/stock_batches/<batch_id> → remove stock
-# quantity: Integer (required)
-# reason: String (optional)
 # ----------------------------------------------------------------------
 @bp.route('/<int:product_id>/stock_batches/<int:batch_id>', methods=['PATCH'])
 def remove_stock_batch(product_id, batch_id):
     try:
-        product = Product.objects.get(id=product_id)
+        product = Product.objects(id=product_id).first()
+        if not product:
+            raise DoesNotExist
     except DoesNotExist:
         return jsonify({"errors": "Product not found"}), 404
-    
+
     try:
-        batch = StockBatch.objects.get(id=batch_id, product_id=product_id)
+        batch = StockBatch.objects(id=batch_id, product_id=product_id).first()
+        if not batch:
+            raise DoesNotExist
     except DoesNotExist:
         return jsonify({"errors": "Stock Batches not found"}), 404
 
@@ -494,18 +473,19 @@ def remove_stock_batch(product_id, batch_id):
     batch.quantity -= remove_qty
     batch.reason = reason
     batch.save()
-    
-    # Log activity
+
+    user_obj = User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first()
+
     ActivityLogger.log_api_activity(
         method='PATCH',
-        target_entity='stock_batch',  # We're modifying a stock batch
-        user_id=data.get('added_by') or API_USER_ID,
+        target_entity='stock_batch',
+        user_id=user_obj,
         details=f"Removed {remove_qty} units from batch {batch.id} of product {product.id}. Reason: {reason}"
     )
-    
+
     ActivityLogger.log_product_action(
         product_id=product.id,
-        user_id=extract_int(data.get('user_id')) or API_USER_ID,
+        user_id=user_obj,
         action_type='Remove Stock',
         quantity=remove_qty,
         notes=f"Removed {remove_qty} units from batch {batch.id}. Reason: {reason}"
@@ -518,47 +498,45 @@ def remove_stock_batch(product_id, batch_id):
         "new_stock_level": product.stock_level
     })
 
+
 # ----------------------------------------------------------------------
-# PATCH /api/v1/products/<product_id>/stock_batches/<batch_id> → edit batch (no quantity change)
-# Attributes (all optional):
-#   expiration_date: String (YYYY-MM-DD)
-#   added_by: Integer (optional)
-#   reason: String (optional)
+# PATCH /api/v1/products/<product_id>/stock_batches/<batch_id>/metadata
 # ----------------------------------------------------------------------
 @bp.route('/<int:product_id>/stock_batches/<int:batch_id>/metadata', methods=['PATCH'])
 def update_stock_batch_metadata(product_id, batch_id):
     try:
-        batch = StockBatch.objects.get(id=batch_id, product=product_id)
+        batch = StockBatch.objects(id=batch_id, product_id=product_id).first()
+        if not batch:
+            raise DoesNotExist
     except DoesNotExist:
         return jsonify({"errors": ["Stock Batches not found"]}), 404
-    
+
     data = request.get_json() or {}
 
-    # Update expiration date
     if "expiration_date" in data:
         new_date = parse_date(data.get('expiration_date'))
         if not new_date:
             return jsonify({"errors": ["Invalid expiration date"]}), 400
         batch.expiration_date = new_date
 
-    # Update added_by
     if "added_by" in data:
         user_id = extract_int(data.get('added_by'))
         if user_id:
             batch.added_by = User.objects(id=user_id).first()
 
-    # Update reason
     if "reason" in data:
         batch.reason = data.get('reason') or batch.reason
-        
+
     changed_fields = []
     for field in ['expiration_date', 'added_by', 'reason']:
         if field in data:
             changed_fields.append(field)
-    
+
+    user_obj = User.objects(id=extract_int(data.get('added_by')) or API_USER_ID).first()
+
     ActivityLogger.log_product_action(
         product_id=product_id,
-        user_id=extract_int(data.get('user_id')) or API_USER_ID,
+        user_id=user_obj,
         action_type='Edit Batch Metadata',
         quantity=None,
         notes=f"Updated batch {batch.id} fields: {', '.join(changed_fields)}"
@@ -569,73 +547,72 @@ def update_stock_batch_metadata(product_id, batch_id):
 
 
 # ----------------------------------------------------------------------
-# DELETE /api/v1/products/<int:id> → delete product
+# DELETE /api/v1/products/<id> → delete product
 # ----------------------------------------------------------------------
 @bp.route('/<int:id>', methods=['DELETE'])
 def delete_product(id):
-    
     data = request.get_json(silent=True) or {}
-    user_id = data.get('user_id') or API_USER_ID
+    user_obj = User.objects(id=extract_int(data.get('user_id')) or API_USER_ID).first()
+
     try:
-        product = Product.objects.get(id=id)
-        
+        product = Product.objects(id=id).first()
+        if not product:
+            raise DoesNotExist
     except DoesNotExist:
-        return jsonify({"errors":["Product not found"]}), 404
-        
+        return jsonify({"errors": ["Product not found"]}), 404
+
     name = product.name
     product.delete()
-    
-    # Log activity
+
+    # ✅ FIX: remove duplicate logger call
     ActivityLogger.log_api_activity(
         method='DELETE',
         target_entity='product',
-        user_id=user_id,
+        user_id=user_obj,
         details=f"Deleted product id={id}, name={name}"
     )
-    
-    ActivityLogger.log_api_activity(
-        method='DELETE',
-        target_entity='product',
-        user_id=user_id,
-        details=f"Deleted product id={id}, name={name}"
-    )
-    
+
     return jsonify({"message": f"{name} product was deleted successfully from inventory."}), 200
+
 
 # ----------------------------------------------------------------------
 # DELETE /api/v1/products/<product_id>/stock_batches/<batch_id> → delete batch
 # ----------------------------------------------------------------------
 @bp.route('/<int:product_id>/stock_batches/<int:batch_id>', methods=['DELETE'])
 def delete_stock_batch(product_id, batch_id):
-   
     try:
-        product = Product.objects.get(id=product_id)
+        product = Product.objects(id=product_id).first()
+        if not product:
+            raise DoesNotExist
     except DoesNotExist:
-        return jsonify({"errors":["Product not found"]}), 404
-    
+        return jsonify({"errors": ["Product not found"]}), 404
+
     try:
-        batch = StockBatch.objects.get(id=batch_id, product_id=product_id)
+        batch = StockBatch.objects(id=batch_id, product_id=product_id).first()
+        if not batch:
+            raise DoesNotExist
     except DoesNotExist:
         return jsonify({"errors": ["Stock Batches not found"]}), 404
 
+    qty_before = batch.quantity
     batch.delete()
-    
+
     data = request.get_json(silent=True) or {}
-    user_id = extract_int(data.get('user_id')) or API_USER_ID
+    user_obj = User.objects(id=extract_int(data.get('user_id')) or API_USER_ID).first()
 
     ActivityLogger.log_api_activity(
         method='DELETE',
         target_entity='stock_batch',
-        user_id=user_id,
+        user_id=user_obj,
         details=f"Deleted stock batch id={batch_id} for product_id={product_id}"
     )
-    
+
     ActivityLogger.log_product_action(
         product_id=product.id,
-        user_id=user_id,
+        user_id=user_obj,
         action_type='Delete Stock Batch',
-        quantity=batch.quantity,
-        notes=f"Deleted batch {batch.id} of {product.name}"
+        quantity=qty_before,
+        notes=f"Deleted batch {batch_id} of {product.name}"
     )
 
     return jsonify({

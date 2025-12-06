@@ -6,8 +6,9 @@ and keep compatibility with your classmate's design.
 These wrap the global theme and provide per-component styles.
 """
 
-from utils.theme import load_light_theme
-from utils.styles import get_dialog_style as _base_dialog_style
+# ✅ FIXED IMPORTS (desktop_app.*)
+from desktop_app.utils.theme import load_light_theme
+from desktop_app.utils.styles import get_dialog_style as _base_dialog_style
 
 
 def get_global_stylesheet():

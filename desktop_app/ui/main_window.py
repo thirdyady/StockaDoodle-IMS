@@ -1,85 +1,239 @@
 # desktop_app/ui/main_window.py
-import os
-from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget
-from PyQt6.QtGui import QIcon
+
+import importlib
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QStackedWidget, QLabel
+)
 from PyQt6.QtCore import Qt
 
-from ui.header_bar import HeaderBar
-from ui.side_bar import SideBar
+from desktop_app.ui.side_bar import SideBar
+from desktop_app.ui.header_bar import HeaderBar
 
-from ui.pages.dashboard import DashboardPage
-from ui.pages.products.product_list import ProductListPage
-from ui.sales.sales_management import SalesManagementPage
-from ui.reports.reports_page import ReportsPage
-from ui.profile.profile_page import ProfilePage
+from desktop_app.ui.pages.dashboard import DashboardPage
+from desktop_app.ui.pages.products.product_list import ProductListPage
+from desktop_app.ui.pages.profile import ProfilePage
 
-from utils.theme import load_light_theme
+
+# ---------------------------------------------------------
+# Simple placeholder page for missing modules
+# ---------------------------------------------------------
+class PlaceholderPage(QWidget):
+    def __init__(self, title: str, subtitle: str = "This page is not implemented yet."):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(48, 48, 48, 48)
+        layout.setSpacing(10)
+
+        t = QLabel(title)
+        t.setStyleSheet("font-size: 24px; font-weight: 800;")
+
+        s = QLabel(subtitle)
+        s.setStyleSheet("font-size: 13px; color: rgba(0,0,0,0.55);")
+
+        layout.addWidget(t)
+        layout.addWidget(s)
+        layout.addStretch()
+
+
+# ---------------------------------------------------------
+# Safe dynamic import helpers
+# ---------------------------------------------------------
+def load_page_class(module_candidates, class_candidates):
+    """
+    Try importing a module from a list of module paths.
+    Then try retrieving a class from a list of class names.
+    Returns the class or None.
+    """
+    for mod_name in module_candidates:
+        try:
+            mod = importlib.import_module(mod_name)
+        except Exception:
+            continue
+
+        for cls_name in class_candidates:
+            cls = getattr(mod, cls_name, None)
+            if cls:
+                return cls
+
+    return None
 
 
 class MainWindow(QMainWindow):
+    """
+    Main shell:
+    - Header (top)
+    - Sidebar (left)
+    - Stack pages (right)
+    """
+
     def __init__(self, user_data=None):
         super().__init__()
+        self.user = user_data or {}
 
-        self.user_data = user_data or {}
+        self.setWindowTitle("StockaDoodle")
+        self.setMinimumSize(1200, 720)
 
-        print(">>> USING MAIN WINDOW FROM:", os.path.abspath(__file__))
+        self._build_ui()
+        self._wire_signals()
 
-        self.setWindowTitle("StockaDoodle – Dashboard")
-        self.resize(1400, 900)
+    # =========================================================
+    # UI BUILD
+    # =========================================================
+    def _build_ui(self):
+        central = QWidget()
+        self.setCentralWidget(central)
 
-        self.setStyleSheet(load_light_theme())
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # App icon
-        icon_path = os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "stockadoodle-transparent.png")
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        # Header
+        self.header = HeaderBar(self.user)
+        root.addWidget(self.header)
 
-        self.init_ui()
+        # Body row
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        root.addLayout(body, 1)
 
-    def init_ui(self):
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        # Sidebar
+        self.sidebar = SideBar(self.user)
+        body.addWidget(self.sidebar)
 
-        root_layout = QHBoxLayout(central_widget)
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
+        # Stack
+        self.stack = QStackedWidget()
+        body.addWidget(self.stack, 1)
 
-        # LEFT SIDE – Sidebar
-        self.sidebar = SideBar(self.user_data)
-        root_layout.addWidget(self.sidebar)
+        # Map labels -> widgets
+        self.pages_by_label = {}
 
-        # RIGHT SIDE – Content
-        content_container = QWidget()
-        content_layout = QVBoxLayout(content_container)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
+        # -----------------------------
+        # Always-available pages
+        # -----------------------------
+        self.dashboard_page = DashboardPage(self.user)
+        self._add_page("Dashboard", self.dashboard_page)
 
-        # HEADER BAR
-        self.header = HeaderBar(self.user_data)
-        self.header.toggle_sidebar.connect(self.toggle_sidebar)
-        content_layout.addWidget(self.header)
+        self.inventory_page = ProductListPage(self.user)
+        self._add_page("Inventory", self.inventory_page)
 
-        # STACKED PAGES
-        self.pages = QStackedWidget()
-        content_layout.addWidget(self.pages)
+        self.profile_page = ProfilePage(self.user)
+        self._add_page("Profile", self.profile_page)
 
-        self.dashboard_page = DashboardPage(self.user_data)
-        self.products_page = ProductListPage()
-        self.sales_page = SalesManagementPage()
-        self.reports_page = ReportsPage()
-        self.profile_page = ProfilePage(self.user_data)
+        # -----------------------------
+        # Sales page
+        # Your actual structure:
+        # ✅ desktop_app/ui/sales/sales_management.py
+        # -----------------------------
+        sales_module_candidates = [
+            "desktop_app.ui.sales.sales_management",
+            # fallback patterns in case teammates added alternates
+            "desktop_app.ui.pages.sales.sales_page",
+            "desktop_app.ui.sales.sales_page",
+        ]
+        sales_class_candidates = [
+            "SalesManagementPage",
+            "SalesPage",
+            "SalesManagement",
+        ]
 
-        self.pages.addWidget(self.dashboard_page)
-        self.pages.addWidget(self.products_page)
-        self.pages.addWidget(self.sales_page)
-        self.pages.addWidget(self.reports_page)
-        self.pages.addWidget(self.profile_page)
+        SalesCls = load_page_class(sales_module_candidates, sales_class_candidates)
+        if SalesCls:
+            try:
+                self.sales_page = SalesCls(self.user)
+            except TypeError:
+                self.sales_page = SalesCls()
+        else:
+            self.sales_page = PlaceholderPage("Sales")
 
-        root_layout.addWidget(content_container)
+        self._add_page("Sales", self.sales_page)
 
-        # Page switch
-        self.sidebar.menu.currentRowChanged.connect(self.pages.setCurrentIndex)
+        # -----------------------------
+        # Reports page
+        # Your actual structure:
+        # ✅ desktop_app/ui/reports/reports_page.py
+        # -----------------------------
+        reports_module_candidates = [
+            "desktop_app.ui.reports.reports_page",
+            "desktop_app.ui.reports",
+            # fallback patterns
+            "desktop_app.ui.pages.reports.reports_page",
+            "desktop_app.ui.pages.reports",
+        ]
+        reports_class_candidates = [
+            "ReportsPage",
+            "ReportPage",
+            "Reports",
+        ]
 
-    def toggle_sidebar(self):
-        """Toggle without animation & without layout breaking."""
+        ReportsCls = load_page_class(reports_module_candidates, reports_class_candidates)
+        if ReportsCls:
+            try:
+                self.reports_page = ReportsCls(self.user)
+            except TypeError:
+                self.reports_page = ReportsCls()
+        else:
+            self.reports_page = PlaceholderPage("Reports")
+
+        self._add_page("Reports", self.reports_page)
+
+        # Default view
+        self.navigate_to("Dashboard")
+
+    def _add_page(self, label: str, widget: QWidget):
+        self.pages_by_label[label] = widget
+        self.stack.addWidget(widget)
+
+    # =========================================================
+    # WIRING
+    # =========================================================
+    def _wire_signals(self):
+        self.sidebar.menu.currentRowChanged.connect(self._handle_sidebar_row_changed)
+
+        self.header.toggle_sidebar.connect(self._toggle_sidebar)
+
+        # This signal must exist in HeaderBar
+        # (you said you replaced header_bar.py already)
+        if hasattr(self.header, "view_profile_requested"):
+            self.header.view_profile_requested.connect(
+                lambda: self.navigate_to("Profile")
+            )
+
+    # =========================================================
+    # NAVIGATION
+    # =========================================================
+    def _handle_sidebar_row_changed(self, row_index: int):
+        item = self.sidebar.menu.item(row_index)
+        if not item:
+            return
+
+        label = item.text()
+
+        # Retailer safety rule
+        if self.user.get("role", "").lower() == "retailer" and label == "Reports":
+            self.navigate_to("Profile")
+            return
+
+        self.navigate_to(label)
+
+    def navigate_to(self, label: str):
+        widget = self.pages_by_label.get(label)
+        if not widget:
+            return
+
+        self.stack.setCurrentWidget(widget)
+
+        # Sync sidebar highlight
+        for i in range(self.sidebar.menu.count()):
+            it = self.sidebar.menu.item(i)
+            if it and it.text() == label:
+                if self.sidebar.menu.currentRow() != i:
+                    self.sidebar.menu.setCurrentRow(i)
+                break
+
+    # =========================================================
+    # SIDEBAR TOGGLE
+    # =========================================================
+    def _toggle_sidebar(self):
         self.sidebar.setVisible(not self.sidebar.isVisible())

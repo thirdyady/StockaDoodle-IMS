@@ -1,19 +1,18 @@
+# desktop_app/utils/__init__.py
 """
-Thin utils package initializer.
+Centralized exports for convenience.
+Avoid circular imports by importing only leaf-level items here.
 
-We intentionally keep this file minimal to avoid circular imports between
-utils.config, utils.helpers, and other submodules.
+In the desktop app, always prefer importing from submodules directly, e.g.:
 
-In the desktop app, always import directly from submodules, e.g.:
-
-    from utils.config import AppConfig
-    from utils.helpers import format_currency, get_feather_icon
-    from utils.theme import load_light_theme
+    from desktop_app.utils.config import AppConfig
+    from desktop_app.utils.helpers import format_date, get_feather_icon
 """
 
-# Re-export AppConfig for convenience if someone does: from utils import AppConfig
-from utils.config import AppConfig
+from desktop_app.utils.config import AppConfig
+from desktop_app.utils.app_state import AppState
 
 __all__ = [
     "AppConfig",
+    "AppState",
 ]

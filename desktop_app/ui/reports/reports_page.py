@@ -1,9 +1,8 @@
-# desktop_app/ui/reports/reports_page.py
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QTextEdit, QFrame, QSizePolicy
 )
-from PyQt6.QtCore import Qt
+
 
 class ReportsPage(QWidget):
     def __init__(self, parent=None):
@@ -35,15 +34,19 @@ class ReportsPage(QWidget):
 
         kpi_row = QHBoxLayout()
         kpi_row.setSpacing(12)
+
         def make_kpi(title_text, value_text):
             card = QFrame()
-            card.setObjectName("KPI")
+            card.setObjectName("Card")
             card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
             inner = QVBoxLayout(card)
             inner.setContentsMargins(14, 12, 14, 12)
-            label = QLabel(title_text); label.setObjectName("CardTitle")
-            value = QLabel(value_text); value.setObjectName("CardValue")
-            inner.addWidget(label); inner.addWidget(value)
+            label = QLabel(title_text)
+            label.setObjectName("CardTitle")
+            value = QLabel(value_text)
+            value.setObjectName("CardValue")
+            inner.addWidget(label)
+            inner.addWidget(value)
             return card
 
         kpi_row.addWidget(make_kpi("Revenue (30d)", "₱125,400"))

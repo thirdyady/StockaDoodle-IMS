@@ -1,8 +1,10 @@
 # desktop_app/ui/sales/sales_management.py
+
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QLineEdit, QTextEdit, QFrame
 )
-from PyQt6.QtCore import Qt
+
 
 class SalesManagementPage(QWidget):
     def __init__(self, parent=None):
@@ -11,27 +13,38 @@ class SalesManagementPage(QWidget):
 
     def init_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(12,12,12,12)
+        root.setContentsMargins(40, 24, 40, 24)
+        root.setSpacing(24)
+
         header = QHBoxLayout()
-        h = QLabel("Sales Management / POS")
-        h.setObjectName("title")
-        header.addWidget(h)
+        title = QLabel("Sales Management / POS")
+        title.setObjectName("title")
+        header.addWidget(title)
         header.addStretch()
         root.addLayout(header)
 
         pos_frame = QFrame()
         pos_frame.setObjectName("Card")
+
         pos_layout = QVBoxLayout(pos_frame)
+        pos_layout.setContentsMargins(12, 12, 12, 12)
+        pos_layout.setSpacing(10)
+
         pos_layout.addWidget(QLabel("Product search"))
-        search = QLineEdit()
-        search.setPlaceholderText("Search by name or barcode")
-        pos_layout.addWidget(search)
+
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search by name or barcode")
+        pos_layout.addWidget(self.search)
+
         pos_layout.addWidget(QLabel("Cart"))
-        cart = QTextEdit()
-        cart.setReadOnly(True)
-        cart.setPlainText("Cart is empty (demo)")
-        pos_layout.addWidget(cart)
-        checkout_btn = QPushButton("Checkout")
-        checkout_btn.setObjectName("primaryBtn")
-        pos_layout.addWidget(checkout_btn)
+
+        self.cart = QTextEdit()
+        self.cart.setReadOnly(True)
+        self.cart.setPlainText("Cart is empty (demo)")
+        pos_layout.addWidget(self.cart)
+
+        self.checkout_btn = QPushButton("Checkout")
+        self.checkout_btn.setObjectName("primaryBtn")
+        pos_layout.addWidget(self.checkout_btn)
+
         root.addWidget(pos_frame)

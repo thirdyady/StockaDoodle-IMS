@@ -1,10 +1,13 @@
+# desktop_app/utils/api_wrapper.py
 # Convenience singleton bridge to the StockaDoodleAPI client.
 # UI modules import these functions to interact with the API without
 # managing client instances.
 
 from typing import Optional, Dict, List, Any
-from utils.config import AppConfig
-from utils.app_state import get_current_user
+
+# ✅ FIXED IMPORTS: use desktop_app.utils.*, not bare utils.*
+from desktop_app.utils.config import AppConfig
+from desktop_app.utils.app_state import get_current_user
 
 _api_client = None
 
@@ -18,7 +21,7 @@ def get_api():
     global _api_client
     if _api_client is None:
         # import here to avoid circular imports at module import time
-        from api_client.stockadoodle_api import StockaDoodleAPI
+        from desktop_app.api_client.stockadoodle_api import StockaDoodleAPI
         _api_client = StockaDoodleAPI(base_url=AppConfig.API_BASE_URL)
     return _api_client
 

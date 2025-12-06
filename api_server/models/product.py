@@ -1,12 +1,15 @@
+# api_server/models/product.py
+
 from .base import BaseDocument
 from mongoengine import StringField, IntField, BinaryField
+
 
 class Product(BaseDocument):
     meta = {
         'collection': 'products',
         'ordering': ['name']
-        }
-    
+    }
+
     # name of the product, must be unique
     name = StringField(max_length=120, unique=True, required=True)
 
@@ -18,22 +21,21 @@ class Product(BaseDocument):
 
     # link to a category
     category_id = IntField(required=True)
-    
+
     # lowest allowed stock before warning
     min_stock_level = IntField(default=10)
 
     # this stores the product picture
     product_image = BinaryField()
-    
+
     # longer description of the product, optional
     details = StringField(max_length=250)
 
     @property
     def stock_level(self):
         from .stock_batch import StockBatch
-        # this adds all batch quantities together
         return sum((batch.quantity or 0) for batch in StockBatch.objects(product_id=self.id))
-    
+
     @property
     def category(self):
         from .category import Category
@@ -45,7 +47,11 @@ class Product(BaseDocument):
             "name": self.name,
             "brand": self.brand or "",
             "price": self.price,
+
+            # ✅ keep both for UI safety
+            "category_id": self.category_id,
             "category": self.category.name if self.category else None,
+
             "stock_level": self.stock_level,
             "min_stock_level": self.min_stock_level,
             "details": self.details or "",
@@ -53,12 +59,13 @@ class Product(BaseDocument):
         }
 
         if include_image and self.product_image:
-            # send image as binary data
             data["image_data"] = self.product_image
 
         if include_batches:
             from .stock_batch import StockBatch
-            # include the list of all stock batches
-            data["batches"] = [batch.to_dict() for batch in StockBatch.objects(product_id=self.id)]
+            data["batches"] = [
+                batch.to_dict()
+                for batch in StockBatch.objects(product_id=self.id)
+            ]
 
         return data

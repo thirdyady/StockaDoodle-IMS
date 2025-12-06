@@ -9,13 +9,12 @@ bp = Blueprint('metrics', __name__)
 
 # ----------------------------------------------------------------------
 # GET /api/v1/retailer/<user_id> → Get retailer metrics
-# Returns: current_streak, daily_quota, sales_today, total_sales
 # ----------------------------------------------------------------------
 @bp.route('/<int:user_id>', methods=['GET'])
 def get_retailer_metrics(user_id):
     """Get retailer's current performance metrics"""
     try:
-        user  = User.objects(id=user_id).first()
+        user = User.objects(id=user_id).first()
         
         if not user:
             return jsonify({"errors": ["Retailer metrics not found"]}), 404
@@ -33,8 +32,6 @@ def get_retailer_metrics(user_id):
 
 # ----------------------------------------------------------------------
 # GET /api/v1/retailer/leaderboard → Get top performing retailers
-# Query params:
-#   limit: Integer (optional, default=10)
 # ----------------------------------------------------------------------
 @bp.route('/leaderboard', methods=['GET'])
 def get_leaderboard():
@@ -55,9 +52,6 @@ def get_leaderboard():
 
 # ----------------------------------------------------------------------
 # PATCH /api/v1/retailer/<user_id>/quota → Update retailer daily quota
-# Body:
-#   daily_quota: Float (required) → New daily quota amount
-#   updated_by: Integer (optional) → Admin/manager user ID
 # ----------------------------------------------------------------------
 @bp.route('/<int:user_id>/quota', methods=['PATCH'])
 def update_retailer_quota(user_id):
@@ -78,7 +72,6 @@ def update_retailer_quota(user_id):
     try:
         metrics = SalesManager.update_retailer_quota(user_id, daily_quota)
         
-        # Log activity
         updated_by = data.get('updated_by')
         ActivityLogger.log_api_activity(
             method='PATCH',
@@ -98,8 +91,6 @@ def update_retailer_quota(user_id):
 
 # ----------------------------------------------------------------------
 # POST /api/v1/retailer/reset-daily → Reset daily metrics 
-# Body:
-#   admin_id: Integer (optional) → Admin performing the reset
 # ----------------------------------------------------------------------
 @bp.route('/reset-daily', methods=['POST'])
 def reset_retailer_streak():
@@ -113,7 +104,6 @@ def reset_retailer_streak():
     try:
         updated_count = SalesManager.reset_daily_metrics()
 
-        # Log activity
         ActivityLogger.log_api_activity(
             method='POST',
             target_entity='metrics_reset',
@@ -128,3 +118,52 @@ def reset_retailer_streak():
         
     except Exception as e:
         return jsonify({"errors": [f"Failed to reset streak: {str(e)}"]}), 500
+
+
+
+# ======================================================================
+# *** THIS IS THE PART YOUR DESKTOP APP WAS CALLING AND FAILING ON ***
+# GET /api/v1/metrics/all
+# ======================================================================
+@bp.route('/metrics/all', methods=['GET'])
+def get_all_metrics():
+    """
+    Returns aggregated global dashboard statistics for ALL users and ALL products.
+    EXACTLY what the GUI dashboard expects.
+    """
+    try:
+        from models.sale import Sale
+        from models.user import User
+        from models.product import Product
+        from models.category import Category
+        import datetime
+
+        total_products = Product.objects.count()
+        total_categories = Category.objects.count()
+
+        total_sales_amount = 0.0
+        today_sales_amount = 0.0
+        today = datetime.date.today()
+
+        for sale in Sale.objects():
+            amount = float(getattr(sale, "total_amount", 0) or 0)
+            total_sales_amount += amount
+
+            try:
+                if callable(sale.transaction_date.date) and sale.transaction_date.date() == today:
+                    today_sales_amount += amount
+            except:
+                pass
+
+        retailers_with_sales = User.objects(role__in=["retailer", "staff"]).count()
+
+        return jsonify({
+            "total_products": total_products,
+            "total_categories": total_categories,
+            "total_sales": total_sales_amount,
+            "sales_today": today_sales_amount,
+            "retailers_with_sales": retailers_with_sales
+        }), 200
+
+    except Exception as e:
+        return jsonify({"errors": [f"Metrics generation failed: {str(e)}"]}), 500
