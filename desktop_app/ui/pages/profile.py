@@ -1,236 +1,387 @@
+# desktop_app/ui/pages/profile.py
+
+from __future__ import annotations
+
+import traceback
+from typing import Dict, Any, Optional
+
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QGridLayout, QGraphicsDropShadowEffect, QPushButton
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QTabWidget, QFrame, QMessageBox
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+
+from desktop_app.utils.api_wrapper import get_api
 
 
-# ====================================
-# Small helper: shadow
-# ====================================
-def apply_card_shadow(widget):
-    shadow = QGraphicsDropShadowEffect()
-    shadow.setBlurRadius(22)
-    shadow.setOffset(0, 3)
-    shadow.setColor(QColor(0, 0, 0, 90))
-    widget.setGraphicsEffect(shadow)
-
-
-# ====================================
-# Reusable info row
-# ====================================
-class InfoRow(QWidget):
-    def __init__(self, label: str, value: str = ""):
-        super().__init__()
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-
-        lbl = QLabel(label)
-        lbl.setStyleSheet("""
-            font-size: 12px;
-            color: rgba(0,0,0,0.55);
-            font-weight: 600;
-            min-width: 110px;
-        """)
-
-        self.val = QLabel(value or "—")
-        self.val.setStyleSheet("""
-            font-size: 14px;
-            font-weight: 600;
-            color: #111827;
-        """)
-
-        layout.addWidget(lbl)
-        layout.addWidget(self.val, 1)
-
-    def set_value(self, value: str):
-        self.val.setText(value or "—")
-
-
-# ====================================
-# MAIN PROFILE PAGE
-# ====================================
 class ProfilePage(QWidget):
+    """
+    Profile page (clean look)
+
+    Tabs:
+      - Information
+      - Security
+    """
+
     def __init__(self, user_data=None, parent=None):
         super().__init__(parent)
-        self.user = user_data or {}
-        self._build_ui()
-        self._load_user()
 
-    # ---------------------------------------
+        self.setObjectName("profilePage")
+
+        self.user: Dict[str, Any] = user_data or {}
+        self.api = get_api()
+
+        self._build_ui()
+        self._apply_strong_overrides()
+        self._populate_fields()
+
+    # =========================================================
     # UI
-    # ---------------------------------------
+    # =========================================================
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(32, 32, 32, 32)
-        root.setSpacing(22)
+        root.setContentsMargins(40, 24, 40, 24)
+        root.setSpacing(20)
 
-        # Title row
-        title_row = QHBoxLayout()
-        title = QLabel("Profile")
-        title.setStyleSheet("""
-            font-size: 26px;
-            font-weight: 800;
-            color: #0A0A0A;
-        """)
-        subtitle = QLabel("Account details and role access.")
-        subtitle.setStyleSheet("""
-            font-size: 12px;
-            color: rgba(0,0,0,0.55);
-        """)
-
-        title_col = QVBoxLayout()
-        title_col.setSpacing(2)
-        title_col.addWidget(title)
-        title_col.addWidget(subtitle)
-
-        title_row.addLayout(title_col)
-        title_row.addStretch()
-
-        root.addLayout(title_row)
-
-        # Main card
-        card = QFrame()
-        card.setObjectName("profileCard")
-        card.setStyleSheet("""
-            #profileCard {
-                background: #FFFFFF;
-                border-radius: 18px;
-                border: 1px solid #DDE3EA;
-            }
-        """)
-        apply_card_shadow(card)
-
-        c_layout = QVBoxLayout(card)
-        c_layout.setContentsMargins(28, 24, 28, 24)
-        c_layout.setSpacing(18)
-
-        # Header inside card
         header = QHBoxLayout()
-        self.name_lbl = QLabel(self.user.get("full_name", "User"))
-        self.name_lbl.setStyleSheet("""
-            font-size: 22px;
-            font-weight: 800;
-            color: #0A2A83;
-        """)
+        name = self.user.get("full_name") or self.user.get("username") or "User"
 
-        self.role_badge = QLabel((self.user.get("role") or "—").capitalize())
-        self.role_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.role_badge.setFixedHeight(26)
-        self.role_badge.setStyleSheet("""
-            background: #EEF3FF;
-            border: 1px solid #D7E2FF;
-            color: #0A2A83;
-            border-radius: 8px;
-            padding: 0 10px;
-            font-size: 11px;
-            font-weight: 700;
-        """)
-
-        header.addWidget(self.name_lbl)
+        title = QLabel(f"Profile — {name}")
+        title.setObjectName("title")
+        header.addWidget(title)
         header.addStretch()
-        header.addWidget(self.role_badge)
+        root.addLayout(header)
 
-        c_layout.addLayout(header)
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        self.tabs.setTabPosition(QTabWidget.TabPosition.North)
 
-        # Divider line
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet("color: #E6EAF3;")
-        c_layout.addWidget(line)
+        # -----------------------------------------------------
+        # Information Tab
+        # -----------------------------------------------------
+        self.info_tab = QWidget()
+        self.info_tab.setObjectName("profileInfoTab")
 
-        # Info grid
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(38)
-        grid.setVerticalSpacing(14)
+        info_l = QVBoxLayout(self.info_tab)
+        info_l.setContentsMargins(6, 6, 6, 6)
+        info_l.setSpacing(12)
 
-        # Left column
-        self.row_id = InfoRow("User ID")
-        self.row_username = InfoRow("Username")
-        self.row_email = InfoRow("Email")
+        info_card = QFrame()
+        info_card.setObjectName("Card")
 
-        # Right column
-        self.row_role = InfoRow("Role")
-        self.row_status = InfoRow("Status", "Active")
-        self.row_note = InfoRow("Access")
+        ic = QVBoxLayout(info_card)
+        ic.setContentsMargins(18, 16, 18, 16)
+        ic.setSpacing(12)
 
-        grid.addWidget(self.row_id, 0, 0)
-        grid.addWidget(self.row_username, 1, 0)
-        grid.addWidget(self.row_email, 2, 0)
+        info_title = QLabel("Account Information")
+        info_title.setObjectName("CardTitle")
+        ic.addWidget(info_title)
 
-        grid.addWidget(self.row_role, 0, 1)
-        grid.addWidget(self.row_status, 1, 1)
-        grid.addWidget(self.row_note, 2, 1)
+        self.input_full_name = QLineEdit()
+        self.input_full_name.setPlaceholderText("Full name")
 
-        c_layout.addLayout(grid)
+        self.input_username = QLineEdit()
+        self.input_username.setReadOnly(True)
 
-        # Role-based access note
-        self.access_hint = QLabel("")
-        self.access_hint.setStyleSheet("""
-            font-size: 12px;
-            color: rgba(0,0,0,0.55);
-        """)
-        c_layout.addWidget(self.access_hint)
+        self.input_email = QLineEdit()
+        self.input_email.setPlaceholderText("Email")
 
-        # Optional buttons row (purely UI for now)
+        self.input_role = QLineEdit()
+        self.input_role.setReadOnly(True)
+
+        ic.addWidget(self._field_block("Full Name", self.input_full_name))
+        ic.addWidget(self._field_block("Username", self.input_username))
+        ic.addWidget(self._field_block("Email", self.input_email))
+        ic.addWidget(self._field_block("Role", self.input_role))
+
         btn_row = QHBoxLayout()
         btn_row.addStretch()
 
-        self.btn_change_password = QPushButton("Change Password")
-        self.btn_change_password.setEnabled(False)  # hook later if needed
-        self.btn_change_password.setStyleSheet("""
-            QPushButton {
-                height: 34px;
-                padding: 0 14px;
-                border-radius: 8px;
-                border: 1px solid #D3D8E5;
-                background: #FFFFFF;
-                font-size: 12px;
-                font-weight: 600;
+        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh.setObjectName("ghost")
+        self.btn_refresh.setFixedHeight(36)
+        self.btn_refresh.clicked.connect(self._on_refresh_clicked)
+
+        self.btn_save = QPushButton("Save Changes")
+        self.btn_save.setObjectName("primaryBtn")
+        self.btn_save.setFixedHeight(36)
+        self.btn_save.clicked.connect(self._on_save_clicked)
+
+        btn_row.addWidget(self.btn_refresh)
+        btn_row.addWidget(self.btn_save)
+        ic.addLayout(btn_row)
+
+        info_l.addWidget(info_card)
+        info_l.addStretch()
+
+        self.tabs.addTab(self.info_tab, "Information")
+
+        # -----------------------------------------------------
+        # Security Tab
+        # -----------------------------------------------------
+        self.security_tab = QWidget()
+        self.security_tab.setObjectName("profileSecurityTab")
+
+        sec_l = QVBoxLayout(self.security_tab)
+        sec_l.setContentsMargins(6, 6, 6, 6)
+        sec_l.setSpacing(12)
+
+        sec_card = QFrame()
+        sec_card.setObjectName("Card")
+
+        sc = QVBoxLayout(sec_card)
+        sc.setContentsMargins(18, 16, 18, 16)
+        sc.setSpacing(10)
+
+        sec_title = QLabel("Security")
+        sec_title.setObjectName("CardTitle")
+        sc.addWidget(sec_title)
+
+        lbl_cp = QLabel("Change Password")
+        lbl_cp.setStyleSheet("background: transparent;")
+        sc.addWidget(lbl_cp)
+
+        self.input_curr_pwd = QLineEdit()
+        self.input_curr_pwd.setPlaceholderText("Current password")
+        self.input_curr_pwd.setEchoMode(QLineEdit.EchoMode.Password)
+
+        self.input_new_pwd = QLineEdit()
+        self.input_new_pwd.setPlaceholderText("New password")
+        self.input_new_pwd.setEchoMode(QLineEdit.EchoMode.Password)
+
+        self.input_confirm_pwd = QLineEdit()
+        self.input_confirm_pwd.setPlaceholderText("Confirm new password")
+        self.input_confirm_pwd.setEchoMode(QLineEdit.EchoMode.Password)
+
+        sc.addWidget(self.input_curr_pwd)
+        sc.addWidget(self.input_new_pwd)
+        sc.addWidget(self.input_confirm_pwd)
+
+        self.btn_change_pwd = QPushButton("Change Password")
+        self.btn_change_pwd.setObjectName("secondaryBtn")
+        self.btn_change_pwd.setFixedHeight(36)
+        self.btn_change_pwd.clicked.connect(self._on_change_password_clicked)
+
+        sc.addWidget(self.btn_change_pwd)
+
+        note = QLabel("This will attempt to call the backend change-password endpoint.")
+        note.setStyleSheet("font-size: 11px; color: rgba(0,0,0,0.55); background: transparent;")
+        sc.addWidget(note)
+
+        sec_l.addWidget(sec_card)
+        sec_l.addStretch()
+
+        self.tabs.addTab(self.security_tab, "Security")
+
+        root.addWidget(self.tabs)
+
+    def _field_block(self, label_text: str, widget: QLineEdit) -> QWidget:
+        wrap = QWidget()
+        wrap.setObjectName("profileFieldBlock")
+
+        l = QVBoxLayout(wrap)
+        l.setContentsMargins(0, 0, 0, 0)
+        l.setSpacing(4)
+
+        lbl = QLabel(label_text)
+        lbl.setObjectName("profileFieldLabel")
+        l.addWidget(lbl)
+        l.addWidget(widget)
+
+        wrap.setStyleSheet("background: transparent;")
+        lbl.setStyleSheet("background: transparent;")
+
+        widget.setStyleSheet("""
+            background: #FFFFFF;
+            color: #0F172A;
+            border: 1px solid #D8E0F0;
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 12.5px;
+        """)
+
+        return wrap
+
+    # =========================================================
+    # STRONG OVERRIDES
+    # =========================================================
+    def _apply_strong_overrides(self):
+        self.setStyleSheet("""
+            #profilePage QWidget#profileInfoTab,
+            #profilePage QWidget#profileSecurityTab {
+                background: transparent;
             }
-            QPushButton:disabled {
-                color: rgba(0,0,0,0.35);
-                background: #F7F8FB;
+            #profilePage QWidget#profileFieldBlock {
+                background: transparent;
+            }
+            #profilePage QLabel#profileFieldLabel {
+                background: transparent;
+                font-weight: 600;
             }
         """)
 
-        btn_row.addWidget(self.btn_change_password)
-        c_layout.addLayout(btn_row)
+    # =========================================================
+    # Data
+    # =========================================================
+    def _populate_fields(self):
+        self.input_full_name.setText(self.user.get("full_name", "") or "")
+        self.input_username.setText(self.user.get("username", "") or "")
+        self.input_email.setText(self.user.get("email", "") or "")
+        self.input_role.setText((self.user.get("role") or "").capitalize())
 
-        root.addWidget(card)
-        root.addStretch()
+    # =========================================================
+    # Actions
+    # =========================================================
+    def _on_refresh_clicked(self):
+        try:
+            uid = self.user.get("id")
+            if not uid:
+                QMessageBox.information(self, "Profile", "No user ID found.")
+                return
 
-    # ---------------------------------------
-    # DATA
-    # ---------------------------------------
-    def _load_user(self):
-        uid = str(self.user.get("id", "—"))
-        username = self.user.get("username", "—")
-        email = self.user.get("email", "—")
-        role = (self.user.get("role") or "—").capitalize()
+            data = None
+            try:
+                data = self.api.get_user(uid)  # type: ignore
+            except Exception:
+                data = None
 
-        self.name_lbl.setText(self.user.get("full_name", "User"))
-        self.role_badge.setText(role)
+            if not data:
+                try:
+                    users = self.api.get_users()
+                    if isinstance(users, dict):
+                        users = users.get("users", [])
+                    data = next((u for u in (users or []) if u.get("id") == uid), None)
+                except Exception:
+                    data = None
 
-        self.row_id.set_value(uid)
-        self.row_username.set_value(username)
-        self.row_email.set_value(email)
-        self.row_role.set_value(role)
+            if not data:
+                QMessageBox.information(
+                    self, "Profile",
+                    "Refresh unavailable. Backend may not support this yet."
+                )
+                return
 
-        # Simple role descriptions
-        role_lower = (self.user.get("role") or "").lower()
-        if role_lower == "admin":
-            access = "Full access to users, inventory, sales, reports."
-        elif role_lower == "manager":
-            access = "Inventory, sales, reports, and monitoring access."
-        elif role_lower == "staff":
-            access = "Inventory operations and sales support."
-        elif role_lower == "retailer":
-            access = "Sales + limited inventory view. Reports restricted."
-        else:
-            access = "Role access not defined."
+            self.user.update(data)
+            self._populate_fields()
+            QMessageBox.information(self, "Profile", "Profile refreshed.")
+        except Exception:
+            traceback.print_exc()
+            QMessageBox.warning(self, "Profile", "Refresh failed.")
 
-        self.row_note.set_value(access)
-        self.access_hint.setText(access)
+    def _on_save_clicked(self):
+        full_name = self.input_full_name.text().strip()
+        email = self.input_email.text().strip()
+
+        if not full_name:
+            QMessageBox.warning(self, "Validation", "Full name cannot be empty.")
+            return
+
+        uid = self.user.get("id")
+        if not uid:
+            QMessageBox.warning(self, "Save Error", "No user ID found.")
+            return
+
+        payload = {"full_name": full_name, "email": email}
+
+        try:
+            updated = False
+
+            # ✅ correct signature: kwargs
+            try:
+                resp = self.api.update_user(uid, **payload)  # type: ignore
+                if resp is not None:
+                    updated = True
+                    if isinstance(resp, dict):
+                        self.user.update(resp)
+            except Exception:
+                updated = False
+
+            if not updated:
+                self.user.update(payload)
+
+            self._populate_fields()
+
+            QMessageBox.information(
+                self, "Profile",
+                "Changes saved." if updated else "Saved locally. Backend update not available yet."
+            )
+        except Exception:
+            traceback.print_exc()
+            QMessageBox.warning(self, "Save Error", "Failed to save changes.")
+
+    # -----------------------------
+    # Password Change (real attempt)
+    # -----------------------------
+    def _on_change_password_clicked(self):
+        curr = (self.input_curr_pwd.text() or "").strip()
+        new = (self.input_new_pwd.text() or "").strip()
+        confirm = (self.input_confirm_pwd.text() or "").strip()
+
+        if not curr or not new:
+            QMessageBox.warning(self, "Change Password", "Current and new password are required.")
+            return
+
+        if new != confirm:
+            QMessageBox.warning(self, "Change Password", "New password and confirmation do not match.")
+            return
+
+        uid = self.user.get("id")
+
+        try:
+            ok = self._attempt_change_password(uid, curr, new)
+            if ok:
+                QMessageBox.information(self, "Change Password", "Password updated successfully.")
+                self.input_curr_pwd.clear()
+                self.input_new_pwd.clear()
+                self.input_confirm_pwd.clear()
+            else:
+                QMessageBox.warning(
+                    self, "Change Password",
+                    "Password update failed.\nBackend method not found or signature mismatch."
+                )
+        except Exception as e:
+            QMessageBox.critical(self, "Change Password", str(e))
+
+    def _attempt_change_password(self, uid: Optional[int], current_pwd: str, new_pwd: str) -> bool:
+        """
+        Try common backend signatures without crashing.
+        """
+        candidates = [
+            "change_password",
+            "update_password",
+            "set_password",
+        ]
+
+        for name in candidates:
+            fn = getattr(self.api, name, None)
+            if not callable(fn):
+                continue
+
+            # Try most explicit signatures first
+            try:
+                if uid is not None:
+                    fn(user_id=uid, current_password=current_pwd, new_password=new_pwd)
+                    return True
+            except Exception:
+                pass
+
+            try:
+                if uid is not None:
+                    fn(uid, current_pwd, new_pwd)
+                    return True
+            except Exception:
+                pass
+
+            try:
+                fn(current_password=current_pwd, new_password=new_pwd)
+                return True
+            except Exception:
+                pass
+
+            try:
+                fn(current_pwd, new_pwd)
+                return True
+            except Exception:
+                pass
+
+        return False

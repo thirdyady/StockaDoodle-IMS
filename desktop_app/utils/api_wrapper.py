@@ -5,9 +5,11 @@
 
 from typing import Optional, Dict, List, Any
 
-# ✅ FIXED IMPORTS: use desktop_app.utils.*, not bare utils.*
 from desktop_app.utils.config import AppConfig
-from desktop_app.utils.app_state import get_current_user
+from desktop_app.utils.app_state import (
+    get_current_user,
+    set_api_client,
+)
 
 _api_client = None
 
@@ -23,6 +25,13 @@ def get_api():
         # import here to avoid circular imports at module import time
         from desktop_app.api_client.stockadoodle_api import StockaDoodleAPI
         _api_client = StockaDoodleAPI(base_url=AppConfig.API_BASE_URL)
+
+        # ✅ optional but clean: store in AppState
+        try:
+            set_api_client(_api_client)
+        except Exception:
+            pass
+
     return _api_client
 
 
@@ -35,11 +44,21 @@ def set_api(api_client):
     global _api_client
     _api_client = api_client
 
+    try:
+        set_api_client(_api_client)
+    except Exception:
+        pass
+
 
 def reset_api():
     """Reset the API client instance."""
     global _api_client
     _api_client = None
+
+    try:
+        set_api_client(None)
+    except Exception:
+        pass
 
 
 # -----------------------
@@ -47,10 +66,7 @@ def reset_api():
 # -----------------------
 
 def login(username: str, password: str) -> Dict:
-    """
-    Login and authenticate user.
-    Returns the API response dict (may include mfa_required).
-    """
+    """Login and authenticate user."""
     api = get_api()
     return api.login(username, password)
 
@@ -105,24 +121,30 @@ def get_product(product_id: int, include_image: bool = False, include_batches: b
     return api.get_product(product_id, include_image=include_image, include_batches=include_batches)
 
 
-def create_product(product_data: Dict[str, Any]) -> Dict:
+def create_product(product_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict:
     """
     Create a new product.
-    product_data should match the parameters expected by StockaDoodleAPI.create_product
-    (e.g. name, price, brand, category_id, product_image (bytes), etc.)
+    Supports both:
+      create_product({"name": ..., "price": ...})
+      create_product(name="...", price=...)
     """
     api = get_api()
-    return api.create_product(**product_data)
+    payload = product_data or kwargs
+    return api.create_product(**payload)
 
 
-def update_product(product_id: int, product_data: Dict[str, Any]) -> Dict:
-    """Update an existing product (partial update)."""
+def update_product(product_id: int, product_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict:
+    """
+    Update an existing product (partial update).
+    Supports both dict and kwargs.
+    """
     api = get_api()
-    return api.update_product(product_id, **product_data)
+    payload = product_data or kwargs
+    return api.update_product(product_id, **payload)
 
 
 def delete_product(product_id: int, user_id: Optional[int] = None) -> Dict:
-    """Delete a product. user_id optionally identifies the actor."""
+    """Delete a product."""
     api = get_api()
     return api.delete_product(product_id, user_id=user_id)
 
@@ -130,7 +152,8 @@ def delete_product(product_id: int, user_id: Optional[int] = None) -> Dict:
 def get_categories(include_image: bool = False) -> List[Dict]:
     """Get all categories."""
     api = get_api()
-    return api.get_categories(include_image=include_image)
+    result = api.get_categories(include_image=include_image)
+    return result if isinstance(result, list) else result.get("categories", [])
 
 
 def get_category(category_id: int, include_image: bool = False) -> Dict:
@@ -140,7 +163,7 @@ def get_category(category_id: int, include_image: bool = False) -> Dict:
 
 
 def create_category(category_data: Dict[str, Any]) -> Dict:
-    """Create a new category. category_data should match create_category args."""
+    """Create a new category."""
     api = get_api()
     return api.create_category(**category_data)
 
@@ -167,13 +190,19 @@ def get_stock_batches(product_id: int) -> Dict:
     return api.get_stock_batches(product_id)
 
 
-def add_stock_batch(product_id: int, batch_data: Dict[str, Any]) -> Dict:
+def add_stock_batch(product_id: int, batch_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict:
     """
     Add a new stock batch.
-    batch_data should include: quantity, expiration_date (ISO str), optional reason, added_by
+
+    Supports both:
+      add_stock_batch(id, {"quantity":..., "expiration_date":..., ...})
+      add_stock_batch(id, quantity=..., expiration_date=..., reason=..., added_by=...)
+
+    This prevents TypeError crashes from UI components that call using kwargs.
     """
     api = get_api()
-    return api.add_stock_batch(product_id, **batch_data)
+    payload = batch_data or kwargs
+    return api.add_stock_batch(product_id, **payload)
 
 
 def delete_stock_batch(product_id: int, batch_id: int, user_id: Optional[int] = None) -> Dict:
@@ -182,13 +211,54 @@ def delete_stock_batch(product_id: int, batch_id: int, user_id: Optional[int] = 
     return api.delete_stock_batch(product_id, batch_id, user_id=user_id)
 
 
-def dispose_product(product_id: int, quantity: int, reason: str, user_id: Optional[int] = None) -> Dict:
+def remove_stock_from_batch(
+    product_id: int,
+    batch_id: int,
+    quantity: int,
+    reason: str,
+    added_by: Optional[int] = None
+) -> Dict:
     """
-    Dispose product stock (FEFO).
-    Note: the underlying API expects product_id and quantity; batch-level dispose logic is handled server-side.
+    Dispose/remove stock from a SPECIFIC batch.
+    This matches your backend:
+      PATCH /products/<product_id>/stock_batches/<batch_id>
     """
     api = get_api()
-    return api.dispose_product(product_id, quantity=quantity, reason=reason, user_id=user_id)
+    payload = {
+        "quantity": quantity,
+        "reason": reason,
+        "added_by": added_by or (api.current_user["id"] if api.current_user else None),
+    }
+    return api._request("PATCH", f"/products/{product_id}/stock_batches/{batch_id}", json=payload)
+
+
+def update_batch_metadata(
+    product_id: int,
+    batch_id: int,
+    expiration_date: Optional[str] = None,
+    reason: Optional[str] = None,
+    added_by: Optional[int] = None
+) -> Dict:
+    """
+    Update batch metadata.
+    Matches your backend:
+      PATCH /products/<product_id>/stock_batches/<batch_id>/metadata
+    """
+    api = get_api()
+    payload: Dict[str, Any] = {}
+
+    if expiration_date is not None:
+        payload["expiration_date"] = expiration_date
+    if reason is not None:
+        payload["reason"] = reason
+
+    payload["added_by"] = added_by or (api.current_user["id"] if api.current_user else None)
+
+    return api._request(
+        "PATCH",
+        f"/products/{product_id}/stock_batches/{batch_id}/metadata",
+        json=payload
+    )
 
 
 # -----------------------
@@ -196,10 +266,7 @@ def dispose_product(product_id: int, quantity: int, reason: str, user_id: Option
 # -----------------------
 
 def record_sale(retailer_id: int, items: List[Dict[str, Any]], total_amount: float) -> Dict:
-    """
-    Record a sale.
-    items should be a list of dicts with keys: product_id, quantity, line_total
-    """
+    """Record a sale."""
     api = get_api()
     return api.record_sale(retailer_id, items, total_amount)
 
@@ -218,7 +285,7 @@ def get_sale(sale_id: int, include_items: bool = True) -> Dict:
 
 
 def undo_sale(sale_id: int, user_id: Optional[int] = None) -> Dict:
-    """Undo a sale (admin only)."""
+    """Undo a sale."""
     api = get_api()
     return api.undo_sale(sale_id, user_id=user_id)
 
@@ -293,6 +360,7 @@ def download_pdf_report(report_type: str, **params) -> bytes:
 
 
 # Notifications & health
+
 def send_low_stock_alerts(triggered_by: int = None) -> Dict:
     api = get_api()
     return api.send_low_stock_alerts(triggered_by=triggered_by)

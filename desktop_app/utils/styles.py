@@ -7,7 +7,7 @@ Used by login and MFA dialogs.
 def get_dialog_style() -> str:
     return r"""
 QDialog, QWidget#loginWindow {
-    background: #F7F8FA;
+    background: #F7F9FC;
     color: #0F172A;
     font-family: "Inter", "Segoe UI", Arial, sans-serif;
     font-size: 13px;
@@ -15,11 +15,13 @@ QDialog, QWidget#loginWindow {
 
 QLabel {
     color: #0F172A;
+    background: transparent;
 }
 
 QLabel#loginTitle {
     font-size: 22px;
-    font-weight: 700;
+    font-weight: 800;
+    color: #0B1B3B;
 }
 
 QLabel#loginSubtitle {
@@ -34,18 +36,22 @@ QLabel#loginFooter {
 
 QLineEdit#loginInput {
     background: white;
-    border: 1px solid rgba(15,23,42,0.08);
-    border-radius: 8px;
-    padding: 8px 10px;
+    border: 1px solid rgba(15,23,42,0.10);
+    border-radius: 10px;
+    padding: 10px 12px;
 }
 
 QPushButton#loginBtn {
-    background: #4B6CFF;
+    background: #0A2A83;
     color: white;
-    border-radius: 10px;
-    padding: 10px 12px;
-    font-weight: 600;
+    border-radius: 12px;
+    padding: 12px 12px;
+    font-weight: 700;
     border: none;
+}
+
+QPushButton#loginBtn:hover {
+    background: #143BAF;
 }
 
 QPushButton#loginBtn:disabled {
@@ -55,8 +61,8 @@ QPushButton#loginBtn:disabled {
 QPushButton#ghost {
     background: transparent;
     color: #0F172A;
-    border-radius: 8px;
+    border-radius: 10px;
     padding: 8px 12px;
-    border: 1px solid rgba(15,23,42,0.06);
+    border: 1px solid rgba(15,23,42,0.08);
 }
 """

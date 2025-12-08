@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import requests
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Union
 
 from desktop_app.utils.config import AppConfig
 
@@ -17,6 +17,10 @@ class StockaDoodleAPI:
     """
     Client-side API wrapper for StockaDoodle IMS.
     Handles HTTP requests to the Flask backend.
+
+    Notes:
+    - _request() supports JSON by default.
+    - For PDF or other binary responses, use raw=True or call download_pdf_report().
     """
 
     def __init__(
@@ -36,24 +40,42 @@ class StockaDoodleAPI:
     def _url(self, endpoint: str) -> str:
         return f"{self.base_url}/{endpoint.lstrip('/')}"
 
-    def _request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        raw: bool = False,
+        **kwargs
+    ) -> Union[Dict[str, Any], bytes]:
+        """
+        Core request handler.
+
+        Args:
+            method: HTTP method
+            endpoint: API endpoint
+            raw: If True, returns bytes without JSON parsing.
+            **kwargs: forwarded to requests.Session.request()
+
+        Returns:
+            dict (JSON) by default, or bytes if raw=True or response is PDF.
+        """
         url = self._url(endpoint)
 
-        # Ensure timeout is always applied unless explicitly overridden
         if "timeout" not in kwargs:
             kwargs["timeout"] = self.timeout
 
         try:
             response = self.session.request(method, url, **kwargs)
 
-            # Try to parse json even on error for better messages
-            try:
-                data = response.json()
-            except Exception:
-                data = None
+            content_type = (response.headers.get("Content-Type") or "").lower()
+            is_pdf = "application/pdf" in content_type
 
             if not response.ok:
-                # Backend often returns { "errors": [...] }
+                try:
+                    data = response.json()
+                except Exception:
+                    data = None
+
                 if isinstance(data, dict):
                     errors = data.get("errors")
                     if isinstance(errors, list) and errors:
@@ -66,11 +88,15 @@ class StockaDoodleAPI:
                     f"HTTP {response.status_code}: {response.reason}"
                 )
 
-            # If ok but no json body
-            if data is None:
-                return {}
+            if raw or is_pdf:
+                return response.content
 
-            return data
+            try:
+                data = response.json()
+            except Exception:
+                data = None
+
+            return data or {}
 
         except requests.exceptions.RequestException as e:
             raise StockaDoodleAPIError(f"Connection error: {str(e)}")
@@ -82,20 +108,22 @@ class StockaDoodleAPI:
         data = {"username": username, "password": password}
         result = self._request("POST", "/users/auth/login", json=data)
 
-        if not result.get("mfa_required"):
+        if isinstance(result, dict) and not result.get("mfa_required"):
             self.current_user = result.get("user")
 
-        return result
+        return result  # type: ignore[return-value]
 
     def send_mfa_code(self, username: str, email: str) -> Dict[str, Any]:
         data = {"username": username, "email": email}
-        return self._request("POST", "/users/auth/mfa/send", json=data)
+        result = self._request("POST", "/users/auth/mfa/send", json=data)
+        return result  # type: ignore[return-value]
 
     def verify_mfa_code(self, username: str, code: str) -> Dict[str, Any]:
         data = {"username": username, "code": code}
         result = self._request("POST", "/users/auth/mfa/verify", json=data)
-        self.current_user = result.get("user")
-        return result
+        if isinstance(result, dict):
+            self.current_user = result.get("user")
+        return result  # type: ignore[return-value]
 
     def logout(self):
         self.current_user = None
@@ -106,11 +134,14 @@ class StockaDoodleAPI:
     def get_users(self, role: Optional[str] = None) -> List[Dict[str, Any]]:
         params = {"role": role} if role else {}
         result = self._request("GET", "/users", params=params)
-        return result.get("users", [])
+        if isinstance(result, dict):
+            return result.get("users", [])
+        return []
 
     def get_user(self, user_id: int, include_image: bool = False) -> Dict[str, Any]:
         params = {"include_image": "true"} if include_image else {}
-        return self._request("GET", f"/users/{user_id}", params=params)
+        result = self._request("GET", f"/users/{user_id}", params=params)
+        return result  # type: ignore[return-value]
 
     def create_user(
         self,
@@ -131,17 +162,21 @@ class StockaDoodleAPI:
         if user_image:
             data["image_data"] = user_image
 
-        return self._request("POST", "/users", json=data)
+        result = self._request("POST", "/users", json=data)
+        return result  # type: ignore[return-value]
 
     def update_user(self, user_id: int, **kwargs) -> Dict[str, Any]:
-        return self._request("PATCH", f"/users/{user_id}", json=kwargs)
+        result = self._request("PATCH", f"/users/{user_id}", json=kwargs)
+        return result  # type: ignore[return-value]
 
     def delete_user(self, user_id: int) -> Dict[str, Any]:
-        return self._request("DELETE", f"/users/{user_id}")
+        result = self._request("DELETE", f"/users/{user_id}")
+        return result  # type: ignore[return-value]
 
     def change_password(self, user_id: int, old_password: str, new_password: str) -> Dict[str, Any]:
         data = {"old_password": old_password, "new_password": new_password}
-        return self._request("POST", f"/users/{user_id}/change-password", json=data)
+        result = self._request("POST", f"/users/{user_id}/change-password", json=data)
+        return result  # type: ignore[return-value]
 
     # ================================================================
     # CATEGORY MANAGEMENT
@@ -149,11 +184,14 @@ class StockaDoodleAPI:
     def get_categories(self, include_image: bool = False) -> List[Dict[str, Any]]:
         params = {"include_image": "true"} if include_image else {}
         result = self._request("GET", "/categories", params=params)
-        return result.get("categories", [])
+        if isinstance(result, dict):
+            return result.get("categories", [])
+        return []
 
     def get_category(self, category_id: int, include_image: bool = False) -> Dict[str, Any]:
         params = {"include_image": "true"} if include_image else {}
-        return self._request("GET", f"/categories/{category_id}", params=params)
+        result = self._request("GET", f"/categories/{category_id}", params=params)
+        return result  # type: ignore[return-value]
 
     def create_category(
         self,
@@ -167,13 +205,16 @@ class StockaDoodleAPI:
         if category_image:
             data["image_data"] = category_image
 
-        return self._request("POST", "/categories", json=data)
+        result = self._request("POST", "/categories", json=data)
+        return result  # type: ignore[return-value]
 
     def update_category(self, category_id: int, **kwargs) -> Dict[str, Any]:
-        return self._request("PATCH", f"/categories/{category_id}", json=kwargs)
+        result = self._request("PATCH", f"/categories/{category_id}", json=kwargs)
+        return result  # type: ignore[return-value]
 
     def delete_category(self, category_id: int) -> Dict[str, Any]:
-        return self._request("DELETE", f"/categories/{category_id}")
+        result = self._request("DELETE", f"/categories/{category_id}")
+        return result  # type: ignore[return-value]
 
     # ================================================================
     # PRODUCT MANAGEMENT
@@ -191,7 +232,8 @@ class StockaDoodleAPI:
             "include_image": "true" if include_image else "false",
             **filters,
         }
-        return self._request("GET", "/products", params=params)
+        result = self._request("GET", "/products", params=params)
+        return result  # type: ignore[return-value]
 
     def get_product(
         self,
@@ -203,7 +245,8 @@ class StockaDoodleAPI:
             "include_image": "true" if include_image else "false",
             "include_batches": "true" if include_batches else "false",
         }
-        return self._request("GET", f"/products/{product_id}", params=params)
+        result = self._request("GET", f"/products/{product_id}", params=params)
+        return result  # type: ignore[return-value]
 
     def create_product(
         self,
@@ -235,22 +278,26 @@ class StockaDoodleAPI:
         if product_image:
             data["image_data"] = product_image
 
-        return self._request("POST", "/products", json=data)
+        result = self._request("POST", "/products", json=data)
+        return result  # type: ignore[return-value]
 
     def update_product(self, product_id: int, **kwargs) -> Dict[str, Any]:
         if self.current_user and "added_by" not in kwargs:
             kwargs["added_by"] = self.current_user["id"]
-        return self._request("PATCH", f"/products/{product_id}", json=kwargs)
+        result = self._request("PATCH", f"/products/{product_id}", json=kwargs)
+        return result  # type: ignore[return-value]
 
     def delete_product(self, product_id: int, user_id: Optional[int] = None) -> Dict[str, Any]:
         data = {"user_id": user_id or (self.current_user["id"] if self.current_user else None)}
-        return self._request("DELETE", f"/products/{product_id}", json=data)
+        result = self._request("DELETE", f"/products/{product_id}", json=data)
+        return result  # type: ignore[return-value]
 
     # ================================================================
     # STOCK BATCH MANAGEMENT
     # ================================================================
     def get_stock_batches(self, product_id: int) -> Dict[str, Any]:
-        return self._request("GET", f"/products/{product_id}/stock_batches")
+        result = self._request("GET", f"/products/{product_id}/stock_batches")
+        return result  # type: ignore[return-value]
 
     def add_stock_batch(
         self,
@@ -266,7 +313,8 @@ class StockaDoodleAPI:
             "reason": reason,
             "added_by": added_by or (self.current_user["id"] if self.current_user else None),
         }
-        return self._request("POST", f"/products/{product_id}/stock_batches", json=data)
+        result = self._request("POST", f"/products/{product_id}/stock_batches", json=data)
+        return result  # type: ignore[return-value]
 
     def dispose_product(
         self,
@@ -275,12 +323,15 @@ class StockaDoodleAPI:
         reason: str,
         user_id: Optional[int] = None
     ) -> Dict[str, Any]:
+        # Server expects product_id + user_id + quantity + notes
         data = {
+            "product_id": product_id,
             "quantity": quantity,
-            "reason": reason,
             "user_id": user_id or (self.current_user["id"] if self.current_user else None),
+            "notes": reason,
         }
-        return self._request("POST", "/log/dispose", json=data)
+        result = self._request("POST", "/log/dispose", json=data)
+        return result  # type: ignore[return-value]
 
     def delete_stock_batch(
         self,
@@ -289,14 +340,16 @@ class StockaDoodleAPI:
         user_id: Optional[int] = None
     ) -> Dict[str, Any]:
         data = {"user_id": user_id or (self.current_user["id"] if self.current_user else None)}
-        return self._request("DELETE", f"/products/{product_id}/stock_batches/{batch_id}", json=data)
+        result = self._request("DELETE", f"/products/{product_id}/stock_batches/{batch_id}", json=data)
+        return result  # type: ignore[return-value]
 
     # ================================================================
     # SALES MANAGEMENT
     # ================================================================
     def record_sale(self, retailer_id: int, items: List[Dict[str, Any]], total_amount: float) -> Dict[str, Any]:
         data = {"retailer_id": retailer_id, "items": items, "total_amount": total_amount}
-        return self._request("POST", "/sales", json=data)
+        result = self._request("POST", "/sales", json=data)
+        return result  # type: ignore[return-value]
 
     def get_sales(
         self,
@@ -312,43 +365,36 @@ class StockaDoodleAPI:
         if retailer_id:
             params["retailer_id"] = retailer_id
 
-        return self._request("GET", "/sales/reports", params=params)
+        result = self._request("GET", "/sales/reports", params=params)
+        return result  # type: ignore[return-value]
 
     def get_sale(self, sale_id: int, include_items: bool = True) -> Dict[str, Any]:
         params = {"include_items": "true" if include_items else "false"}
-        return self._request("GET", f"/sales/{sale_id}", params=params)
+        result = self._request("GET", f"/sales/{sale_id}", params=params)
+        return result  # type: ignore[return-value]
 
     def undo_sale(self, sale_id: int, user_id: Optional[int] = None) -> Dict[str, Any]:
         data = {"user_id": user_id or (self.current_user["id"] if self.current_user else None)}
-        return self._request("DELETE", f"/sales/{sale_id}", json=data)
+        result = self._request("DELETE", f"/sales/{sale_id}", json=data)
+        return result  # type: ignore[return-value]
 
     # ================================================================
     # LOGS & AUDIT
     # ================================================================
     def get_product_logs(self, product_id: int, limit: int = 50) -> Dict[str, Any]:
-        return self._request("GET", f"/log/product/{product_id}", params={"limit": limit})
+        result = self._request("GET", f"/log/product/{product_id}", params={"limit": limit})
+        return result  # type: ignore[return-value]
 
     def get_user_logs(self, user_id: int, limit: int = 50) -> Dict[str, Any]:
-        return self._request("GET", f"/log/user/{user_id}", params={"limit": limit})
+        result = self._request("GET", f"/log/user/{user_id}", params={"limit": limit})
+        return result  # type: ignore[return-value]
 
     def get_all_logs(self, action_type: Optional[str] = None, limit: int = 100) -> Dict[str, Any]:
         params = {"limit": limit}
         if action_type:
             params["action_type"] = action_type
-        return self._request("GET", "/log", params=params)
-
-    def get_disposal_report(
-        self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        limit: int = 100
-    ) -> Dict[str, Any]:
-        params: Dict[str, Any] = {"limit": limit}
-        if start_date:
-            params["start_date"] = start_date
-        if end_date:
-            params["end_date"] = end_date
-        return self._request("GET", "/log/disposal", params=params)
+        result = self._request("GET", "/log", params=params)
+        return result  # type: ignore[return-value]
 
     def get_api_logs(
         self,
@@ -361,19 +407,23 @@ class StockaDoodleAPI:
             params["method"] = method
         if target_entity:
             params["target_entity"] = target_entity
-        return self._request("GET", "/log/api", params=params)
+        result = self._request("GET", "/log/api", params=params)
+        return result  # type: ignore[return-value]
 
     # ================================================================
     # METRICS
     # ================================================================
     def get_retailer_metrics(self, user_id: int) -> Dict[str, Any]:
-        return self._request("GET", f"/retailer/{user_id}")
+        result = self._request("GET", f"/retailer/{user_id}")
+        return result  # type: ignore[return-value]
 
     def get_leaderboard(self, limit: int = 10) -> Dict[str, Any]:
-        return self._request("GET", "/retailer/leaderboard", params={"limit": limit})
+        result = self._request("GET", "/retailer/leaderboard", params={"limit": limit})
+        return result  # type: ignore[return-value]
 
     def get_all_metrics(self) -> Dict[str, Any]:
-        return self._request("GET", "/metrics/all")
+        result = self._request("GET", "/metrics/all")
+        return result  # type: ignore[return-value]
 
     def update_retailer_quota(
         self,
@@ -385,7 +435,8 @@ class StockaDoodleAPI:
             "new_quota": new_quota,
             "updated_by": updated_by or (self.current_user["id"] if self.current_user else None),
         }
-        return self._request("PATCH", f"/metrics/retailer/{user_id}/quota", json=data)
+        result = self._request("PATCH", f"/metrics/retailer/{user_id}/quota", json=data)
+        return result  # type: ignore[return-value]
 
     # ================================================================
     # REPORTS (JSON endpoints)
@@ -400,7 +451,33 @@ class StockaDoodleAPI:
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-        return self._request("GET", "/reports/sales-performance", params=params)
+        result = self._request("GET", "/reports/sales-performance", params=params)
+        return result  # type: ignore[return-value]
+
+    def get_category_distribution_report(self) -> Dict[str, Any]:
+        result = self._request("GET", "/reports/category-distribution")
+        return result  # type: ignore[return-value]
+
+    def get_retailer_performance_report(self) -> Dict[str, Any]:
+        result = self._request("GET", "/reports/retailer-performance")
+        return result  # type: ignore[return-value]
+
+    def get_alerts_report(self, days_ahead: int = 7) -> Dict[str, Any]:
+        result = self._request("GET", "/reports/alerts", params={"days_ahead": days_ahead})
+        return result  # type: ignore[return-value]
+
+    def get_managerial_activity_report(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        result = self._request("GET", "/reports/managerial-activity", params=params)
+        return result  # type: ignore[return-value]
 
     def get_detailed_transaction_report(
         self,
@@ -412,40 +489,37 @@ class StockaDoodleAPI:
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-        return self._request("GET", "/reports/transactions", params=params)
+        result = self._request("GET", "/reports/transactions", params=params)
+        return result  # type: ignore[return-value]
 
     def get_user_accounts_report(self) -> Dict[str, Any]:
-        return self._request("GET", "/reports/user-accounts")
+        result = self._request("GET", "/reports/user-accounts")
+        return result  # type: ignore[return-value]
 
     # ================================================================
     # REPORTS (PDF download)
     # ================================================================
     def download_pdf_report(self, report_type: str, **params) -> bytes:
-        """
-        Download PDF report from: /reports/<type>/pdf
-        Returns raw bytes.
-        """
-        url = self._url(f"/reports/{report_type}/pdf")
-
-        try:
-            response = self.session.get(url, params=params, timeout=self.timeout)
-            if not response.ok:
-                raise StockaDoodleAPIError(
-                    f"Failed to download PDF: HTTP {response.status_code}"
-                )
-            return response.content
-        except requests.exceptions.RequestException as e:
-            raise StockaDoodleAPIError(f"Connection error: {str(e)}")
+        result = self._request(
+            "GET",
+            f"/reports/{report_type}/pdf",
+            params=params or None,
+            raw=True
+        )
+        if isinstance(result, (bytes, bytearray)):
+            return bytes(result)
+        raise StockaDoodleAPIError("PDF download failed: response was not bytes.")
 
     # ================================================================
     # NOTIFICATIONS
     # ================================================================
     def send_low_stock_alerts(self, triggered_by: Optional[int] = None) -> Dict[str, Any]:
-        return self._request(
+        result = self._request(
             "POST",
             "/notifications/low-stock",
             json={"triggered_by": triggered_by},
         )
+        return result  # type: ignore[return-value]
 
     def send_expiration_alerts(
         self,
@@ -453,14 +527,16 @@ class StockaDoodleAPI:
         triggered_by: Optional[int] = None
     ) -> Dict[str, Any]:
         data = {"days_ahead": days_ahead, "triggered_by": triggered_by}
-        return self._request("POST", "/notifications/expiring", json=data)
+        result = self._request("POST", "/notifications/expiring", json=data)
+        return result  # type: ignore[return-value]
 
     def send_daily_summary(self, triggered_by: Optional[int] = None) -> Dict[str, Any]:
-        return self._request(
+        result = self._request(
             "POST",
             "/notifications/daily-summary",
             json={"triggered_by": triggered_by},
         )
+        return result  # type: ignore[return-value]
 
     def get_notification_history(
         self,
@@ -470,10 +546,12 @@ class StockaDoodleAPI:
         params = {"limit": limit}
         if notification_type:
             params["notification_type"] = notification_type
-        return self._request("GET", "/notifications/history", params=params)
+        result = self._request("GET", "/notifications/history", params=params)
+        return result  # type: ignore[return-value]
 
     # ================================================================
     # HEALTH CHECK
     # ================================================================
     def health_check(self) -> Dict[str, Any]:
-        return self._request("GET", "/health")
+        result = self._request("GET", "/health")
+        return result  # type: ignore[return-value]

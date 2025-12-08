@@ -8,6 +8,7 @@ from desktop_app.ui.login_window import LoginWindow
 from desktop_app.ui.main_window import MainWindow
 
 from desktop_app.utils.app_state import set_current_user
+from desktop_app.utils.style_presets import get_global_stylesheet
 
 
 def show_crash_dialog(exc_type, exc_value, exc_traceback):
@@ -52,6 +53,13 @@ def on_login_successful(user_data: dict):
 
 def main():
     app = QApplication(sys.argv)
+
+    # ✅ Apply ONE global stylesheet once
+    # Login/MFA can still apply dialog-specific styles locally if needed
+    try:
+        app.setStyleSheet(get_global_stylesheet())
+    except Exception as e:
+        print("[WARNING] Failed to apply global stylesheet:", e)
 
     # Global icon
     icon_path = os.path.join(

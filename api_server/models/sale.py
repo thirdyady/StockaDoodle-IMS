@@ -1,3 +1,5 @@
+# api_server/models/sale.py
+
 from .base import BaseDocument
 from mongoengine import (
     IntField,
@@ -5,16 +7,20 @@ from mongoengine import (
     DateTimeField,
     EmbeddedDocument,
     EmbeddedDocumentField,
-    ListField,
-    ReferenceField
+    ListField
 )
-from models.product import Product
 from datetime import datetime, timezone
 
 
 class SaleItem(EmbeddedDocument):
-    
-    sale = ReferenceField('Sale')  
+    """
+    Embedded sale line item.
+
+    NOTE:
+    We remove the `sale = ReferenceField('Sale')` because this is an
+    EmbeddedDocument stored inside Sale.items. Referencing the parent
+    is unnecessary and can lead to confusion or broken query patterns.
+    """
 
     product_id = IntField(required=True)
 
@@ -30,38 +36,39 @@ class SaleItem(EmbeddedDocument):
             "quantity": self.quantity,
             "line_total": self.line_total
         }
-        
-        
+
+
 class Sale(BaseDocument):
     meta = {
         'collection': 'sales',
         'ordering': ['-created_at']
     }
-    
+
     # which retailer made the sale
     retailer_id = IntField(required=True)
-    
+
     # when the sale happened
     created_at = DateTimeField(default=lambda: datetime.now(timezone.utc))
-    
+
     # full sale amount
     total_amount = FloatField(default=0.0)
-    
+
     # list of items inside this sale
     items = ListField(EmbeddedDocumentField(SaleItem))
 
     def to_dict(self, include_items=False):
         data = {
             "id": self.id,
-            "user_id": self.retailer_id,
+
+            # Keep both to avoid breaking older consumers
+            "retailer_id": self.retailer_id,
+            "user_id": self.retailer_id,  # legacy alias
+
             "total_amount": self.total_amount,
-            "created_at": self.created_at.isoformat(),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
         if include_items:
-            # include every sale item if asked
-            data["items"] = [item.to_dict() for item in self.items]
+            data["items"] = [item.to_dict() for item in (self.items or [])]
 
         return data
-
-

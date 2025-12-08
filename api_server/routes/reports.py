@@ -1,12 +1,39 @@
+# api_server/routes/reports.py
+
 from flask import Blueprint, request, jsonify, send_file
 from core.report_generator import ReportGenerator
-from datetime import datetime, date, timedelta
 from core.pdf_report_generator import PDFReportGenerator
+from datetime import datetime
 
 # Initialize PDF generator
 pdf_generator = PDFReportGenerator()
 
 bp = Blueprint('reports', __name__)
+
+
+# -------------------------------------------------------------
+# Internal helpers
+# -------------------------------------------------------------
+def _parse_date_param(value: str | None, label: str):
+    """
+    Parse YYYY-MM-DD string into date.
+    Returns None if value is falsy.
+    Raises ValueError with a clean message if format is invalid.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, '%Y-%m-%d').date()
+    except ValueError:
+        raise ValueError(f"Invalid {label} format. Use YYYY-MM-DD")
+
+
+def _get_date_range_from_args():
+    start = request.args.get('start_date')
+    end = request.args.get('end_date')
+    start_date = _parse_date_param(start, "start_date")
+    end_date = _parse_date_param(end, "end_date")
+    return start_date, end_date
 
 
 # ----------------------------------------------------------------------
@@ -19,17 +46,12 @@ bp = Blueprint('reports', __name__)
 def sales_performance_report():
     """Report 1: Sales Performance Report for Selected Date Range"""
     try:
-        start = request.args.get('start_date')
-        end = request.args.get('end_date')
-        
-        start_date = datetime.strptime(start, '%Y-%m-%d').date()
-        end_date = datetime.strptime(end, '%Y-%m-%d').date()
-        
+        start_date, end_date = _get_date_range_from_args()
         report = ReportGenerator.sales_performance_report(start_date, end_date)
         return jsonify(report), 200
-        
-    except ValueError:
-        return jsonify({"errors": ["Invalid date format. Use YYYY-MM-DD"]}), 400
+
+    except ValueError as e:
+        return jsonify({"errors": [str(e)]}), 400
     except Exception as e:
         return jsonify({"errors": [f"Failed to generate report: {str(e)}"]}), 500
 
@@ -86,17 +108,12 @@ def alerts_report():
 def managerial_activity_report():
     """Report 5: Managerial Activity Log Report"""
     try:
-        start = request.args.get('start_date')
-        end = request.args.get('end_date')
-        
-        start_date = datetime.strptime(start, '%Y-%m-%d').date() if start else None
-        end_date = datetime.strptime(end, '%Y-%m-%d').date() if end else None
-        
+        start_date, end_date = _get_date_range_from_args()
         report = ReportGenerator.managerial_activity_log_report(start_date, end_date)
         return jsonify(report), 200
-        
-    except ValueError:
-        return jsonify({"errors": ["Invalid date format. Use YYYY-MM-DD"]}), 400
+
+    except ValueError as e:
+        return jsonify({"errors": [str(e)]}), 400
     except Exception as e:
         return jsonify({"errors": [f"Failed to generate report: {str(e)}"]}), 500
 
@@ -111,17 +128,12 @@ def managerial_activity_report():
 def transactions_report():
     """Report 6: Detailed Sales Transaction Report"""
     try:
-        start = request.args.get('start_date')
-        end = request.args.get('end_date')
-        
-        start_date = datetime.strptime(start, '%Y-%m-%d').date() if start else None
-        end_date = datetime.strptime(end, '%Y-%m-%d').date() if end else None
-        
+        start_date, end_date = _get_date_range_from_args()
         report = ReportGenerator.detailed_sales_transaction_report(start_date, end_date)
         return jsonify(report), 200
-        
-    except ValueError:
-        return jsonify({"errors": ["Invalid date format. Use YYYY-MM-DD"]}), 400
+
+    except ValueError as e:
+        return jsonify({"errors": [str(e)]}), 400
     except Exception as e:
         return jsonify({"errors": [f"Failed to generate report: {str(e)}"]}), 500
 
@@ -137,8 +149,7 @@ def user_accounts_report():
         return jsonify(report), 200
     except Exception as e:
         return jsonify({"errors": [f"Failed to generate report: {str(e)}"]}), 500
-    
-    
+
 
 # ----------------------------------------------------------------------
 # GET /api/v1/reports/sales-performance/pdf → Download Report 1 as PDF
@@ -147,28 +158,21 @@ def user_accounts_report():
 def download_sales_performance_pdf():
     """Download Sales Performance Report as PDF"""
     try:
-        # Get report data
-        start = request.args.get('start_date')
-        end = request.args.get('end_date')
-        
-        start_date = datetime.strptime(start, '%Y-%m-%d').date() if start else None
-        end_date = datetime.strptime(end, '%Y-%m-%d').date() if end else None
-        
+        start_date, end_date = _get_date_range_from_args()
         report_data = ReportGenerator.sales_performance_report(start_date, end_date)
-        
-        # Generate PDF
+
         pdf_buffer = pdf_generator.generate_sales_performance_report(report_data)
-        
-        # Create filename
         filename = f"Sales_Performance_Report_{datetime.now().strftime('%Y%m%d')}.pdf"
-        
+
         return send_file(
             pdf_buffer,
             mimetype='application/pdf',
             as_attachment=True,
             download_name=filename
         )
-        
+
+    except ValueError as e:
+        return jsonify({"errors": [str(e)]}), 400
     except Exception as e:
         return jsonify({"errors": [f"Failed to generate PDF: {str(e)}"]}), 500
 
@@ -182,9 +186,8 @@ def download_category_distribution_pdf():
     try:
         report_data = ReportGenerator.category_distribution_report()
         pdf_buffer = pdf_generator.generate_category_distribution_report(report_data)
-        
+
         filename = f"Category_Distribution_Report_{datetime.now().strftime('%Y%m%d')}.pdf"
-        
         return send_file(
             pdf_buffer,
             mimetype='application/pdf',
@@ -204,9 +207,8 @@ def download_retailer_performance_pdf():
     try:
         report_data = ReportGenerator.retailer_performance_report()
         pdf_buffer = pdf_generator.generate_retailer_performance_report(report_data)
-        
+
         filename = f"Retailer_Performance_Report_{datetime.now().strftime('%Y%m%d')}.pdf"
-        
         return send_file(
             pdf_buffer,
             mimetype='application/pdf',
@@ -227,9 +229,8 @@ def download_alerts_pdf():
         days_ahead = request.args.get('days_ahead', 7, type=int)
         report_data = ReportGenerator.low_stock_and_expiration_alert_report(days_ahead)
         pdf_buffer = pdf_generator.generate_alerts_report(report_data)
-        
+
         filename = f"Alerts_Report_{datetime.now().strftime('%Y%m%d')}.pdf"
-        
         return send_file(
             pdf_buffer,
             mimetype='application/pdf',
@@ -247,23 +248,19 @@ def download_alerts_pdf():
 def download_managerial_activity_pdf():
     """Download Managerial Activity Log Report as PDF"""
     try:
-        start = request.args.get('start_date')
-        end = request.args.get('end_date')
-        
-        start_date = datetime.strptime(start, '%Y-%m-%d').date() if start else None
-        end_date = datetime.strptime(end, '%Y-%m-%d').date() if end else None
-        
+        start_date, end_date = _get_date_range_from_args()
         report_data = ReportGenerator.managerial_activity_log_report(start_date, end_date)
         pdf_buffer = pdf_generator.generate_managerial_activity_report(report_data)
-        
+
         filename = f"Managerial_Activity_Report_{datetime.now().strftime('%Y%m%d')}.pdf"
-        
         return send_file(
             pdf_buffer,
             mimetype='application/pdf',
             as_attachment=True,
             download_name=filename
         )
+    except ValueError as e:
+        return jsonify({"errors": [str(e)]}), 400
     except Exception as e:
         return jsonify({"errors": [f"Failed to generate PDF: {str(e)}"]}), 500
 
@@ -275,23 +272,19 @@ def download_managerial_activity_pdf():
 def download_transactions_pdf():
     """Download Detailed Sales Transaction Report as PDF"""
     try:
-        start = request.args.get('start_date')
-        end = request.args.get('end_date')
-        
-        start_date = datetime.strptime(start, '%Y-%m-%d').date() if start else None
-        end_date = datetime.strptime(end, '%Y-%m-%d').date() if end else None
-        
+        start_date, end_date = _get_date_range_from_args()
         report_data = ReportGenerator.detailed_sales_transaction_report(start_date, end_date)
         pdf_buffer = pdf_generator.generate_transactions_report(report_data)
-        
+
         filename = f"Sales_Transactions_Report_{datetime.now().strftime('%Y%m%d')}.pdf"
-        
         return send_file(
             pdf_buffer,
             mimetype='application/pdf',
             as_attachment=True,
             download_name=filename
         )
+    except ValueError as e:
+        return jsonify({"errors": [str(e)]}), 400
     except Exception as e:
         return jsonify({"errors": [f"Failed to generate PDF: {str(e)}"]}), 500
 
@@ -305,9 +298,8 @@ def download_user_accounts_pdf():
     try:
         report_data = ReportGenerator.user_accounts_report()
         pdf_buffer = pdf_generator.generate_user_accounts_report(report_data)
-        
+
         filename = f"User_Accounts_Report_{datetime.now().strftime('%Y%m%d')}.pdf"
-        
         return send_file(
             pdf_buffer,
             mimetype='application/pdf',

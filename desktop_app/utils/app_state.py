@@ -43,14 +43,13 @@ class AppState(QObject):
         if value:
             self.user_changed.emit(value)
 
-    # >>> FIX YOU NEED <<<
+    # Compatibility method expected by login logic.
     def set_logged_in_user(self, user_data: Dict[str, Any]):
         """Compatibility method expected by login logic."""
         self.current_user = user_data
 
     def get_logged_in_user(self) -> Optional[Dict[str, Any]]:
         return self.current_user
-    # <<< FIX DONE <<<
 
     # --------------------------------------------------------------------------
     # API CLIENT STATE

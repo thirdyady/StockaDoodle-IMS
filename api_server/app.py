@@ -11,16 +11,23 @@ load_dotenv()
 def create_app():
     app = Flask(__name__)
 
+    # -------------------------
+    # CONFIG
+    # -------------------------
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'stockadoodle-dev-2025')
 
+    # Use ONE consistent env key for Mongo
+    mongo_uri = os.getenv('MONGO_URI') or os.getenv('MONGODB_URI') or 'mongodb://localhost:27017/'
+    db_name = os.getenv('DATABASE_NAME', 'stockadoodle')
+
     connect(
-        db=os.getenv('DATABASE_NAME', 'stockadoodle'),
-        host=os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
+        db=db_name,
+        host=mongo_uri
     )
 
     # Ensure models are loaded
     with app.app_context():
-        from models import (
+        from models import (  # noqa: F401
             category,
             product,
             api_activity_log,
@@ -91,4 +98,14 @@ def create_app():
 
 if __name__ == '__main__':
     app = create_app()
-    app.run(host='127.0.0.1', port=5000, debug=True)
+
+    # Safe host/port resolution for Windows
+    host = os.getenv("FLASK_HOST", "127.0.0.1").strip()
+    port = int(os.getenv("FLASK_PORT", 5000))
+
+    # Prevent bad host formats like "http://127.0.0.1:5000"
+    host = host.replace("http://", "").replace("https://", "")
+    if ":" in host:
+        host = host.split(":")[0]
+
+    app.run(host=host, port=port, debug=True)

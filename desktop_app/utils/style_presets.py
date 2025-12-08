@@ -1,30 +1,31 @@
-# desktop_app/utils/style_presets.py
 """
 Style preset helper functions to satisfy utils.__init__.__all__
 and keep compatibility with your classmate's design.
 
-These wrap the global theme and provide per-component styles.
+IMPORTANT:
+We must not reintroduce old theme rules that cause
+gray label strips. So all global styles come from
+the single source theme.
 """
 
-# ✅ FIXED IMPORTS (desktop_app.*)
-from desktop_app.utils.theme import load_light_theme
+from desktop_app.utils.theme import load_app_theme
 from desktop_app.utils.styles import get_dialog_style as _base_dialog_style
 
 
 def get_global_stylesheet():
     """
-    Global app stylesheet. Right now we just reuse the light corporate theme.
+    Global app stylesheet. Uses the unified theme.
     """
-    return load_light_theme()
+    return load_app_theme()
 
 
 def get_dashboard_card_style():
     """
-    Extra style you can apply to dashboard cards if needed.
+    Optional extra style hook (safe).
     """
     return """
     QFrame[objectName='dashboardCard'] {
-        background: white;
+        background: #FFFFFF;
         border-radius: 10px;
         border: 1px solid rgba(0,0,0,0.08);
         padding: 12px;
@@ -56,7 +57,8 @@ def get_category_card_style():
 
 def get_dialog_style():
     """
-    Use the existing dialog style from utils/styles.py so MFA/login stay consistent.
+    Use the existing dialog style from utils/styles.py
+    so MFA/login stay consistent.
     """
     return _base_dialog_style()
 
@@ -91,7 +93,7 @@ def get_loading_spinner_style():
 def get_modern_card_style():
     return """
     QFrame[objectName='modernCard'] {
-        background: white;
+        background: #FFFFFF;
         border-radius: 12px;
         padding: 12px;
         border: 1px solid rgba(0,0,0,0.08);
@@ -99,11 +101,13 @@ def get_modern_card_style():
     QLabel.cardTitle {
         color: #64748B;
         font-weight: 600;
+        background: transparent;
     }
     QLabel.cardValue {
         color: #0F172A;
         font-weight: 800;
         font-size: 16px;
+        background: transparent;
     }
     """
 
@@ -128,17 +132,20 @@ def apply_table_styles(table):
     try:
         table.setStyleSheet("""
         QHeaderView::section {
-            background: #F3F4F6;
+            background: #F4F6FD;
             border: none;
             padding: 6px 8px;
-            font-weight: 600;
+            font-weight: 700;
         }
         QTableWidget {
             gridline-color: rgba(0,0,0,0.08);
-            background: white;
+            background: #FFFFFF;
             selection-background-color: #DBEAFE;
+            alternate-background-color: #F8FAFF;
+        }
+        QTableWidget::item {
+            background: transparent;
         }
         """)
     except Exception:
-        # don't crash the app if someone passes a weird object
         pass

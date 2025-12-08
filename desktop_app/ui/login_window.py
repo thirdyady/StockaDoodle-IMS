@@ -21,6 +21,10 @@ from desktop_app.utils.helpers import get_feather_icon
 from desktop_app.utils.config import AppConfig  # kept for future use / consistency
 from desktop_app.utils.styles import get_dialog_style
 
+# ✅ IMPORTANT: use the shared singleton API + app state
+from desktop_app.utils.api_wrapper import get_api
+from desktop_app.utils.app_state import set_current_user
+
 
 class LoginWindow(QWidget):
     login_successful = pyqtSignal(dict)
@@ -40,7 +44,9 @@ class LoginWindow(QWidget):
             except Exception:
                 pass
 
+        # Local client (kept)
         self.api_client = StockaDoodleAPI()
+
         self.attempted_user: dict | None = None
 
         self.setStyleSheet(get_dialog_style())
@@ -161,6 +167,8 @@ class LoginWindow(QWidget):
             else:
                 user = result.get("user")
                 if user:
+                    # ✅ store globally before emitting success
+                    self._broadcast_login(user)
                     self.login_successful.emit(user)
                     self.close()
                 else:
@@ -206,8 +214,40 @@ class LoginWindow(QWidget):
             self._set_busy(False)
 
     def on_mfa_success(self, verified_user: dict):
+        # ✅ store globally before emitting success
+        self._broadcast_login(verified_user)
         self.login_successful.emit(verified_user)
         self.close()
+
+    # -------------------
+    # State sync
+    # -------------------
+    def _broadcast_login(self, user: dict):
+        """
+        Ensure ALL parts of the desktop app can see the logged-in user:
+
+        1) local LoginWindow client
+        2) shared singleton client used by pages
+        3) AppState singleton (signals + global UI)
+        """
+        # 1) local client
+        try:
+            self.api_client.current_user = user
+        except Exception:
+            pass
+
+        # 2) shared singleton API
+        try:
+            shared_api = get_api()
+            shared_api.current_user = user
+        except Exception:
+            pass
+
+        # 3) global app state
+        try:
+            set_current_user(user)
+        except Exception:
+            pass
 
     def _set_busy(self, busy: bool):
         if busy:

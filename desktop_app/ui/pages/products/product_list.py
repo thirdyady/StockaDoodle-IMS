@@ -1,38 +1,51 @@
 # desktop_app/ui/pages/products/product_list.py
 
+from __future__ import annotations
+
+from typing import Dict, Any, List, Optional
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QDialog, QFormLayout, QLineEdit, QSpinBox, QTextEdit, QComboBox,
-    QMessageBox
+    QMessageBox, QFrame, QSizePolicy, QScrollArea, QGridLayout
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 
-from desktop_app.api_client.stockadoodle_api import StockaDoodleAPI
 from desktop_app.utils.helpers import get_feather_icon
+from desktop_app.utils.api_wrapper import get_api
+
+from desktop_app.ui.components.stock_batch_selector import StockBatchSelector
+from desktop_app.ui.components.product_card import ProductCard
+from desktop_app.ui.components.category_form_dialog import CategoryFormDialog
 
 
 # ===========================================
 # PRODUCT FORM DIALOG (ADD / EDIT)
 # ===========================================
 class ProductFormDialog(QDialog):
-    def __init__(self, api: StockaDoodleAPI, categories: dict,
-                 product: dict | None = None, parent=None):
+    def __init__(self, api, categories: dict, product: dict | None = None, parent=None):
         super().__init__(parent)
         self.api = api
         self.categories = categories or {}
         self.product = product
 
         self.setWindowTitle("Edit Product" if product else "Add Product")
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(440)
 
         self._build_ui()
         if self.product:
             self._populate()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(12)
+
+        form_card = QFrame()
+        form_card.setObjectName("Card")
+        form_layout = QVBoxLayout(form_card)
+        form_layout.setContentsMargins(14, 12, 14, 12)
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -45,29 +58,28 @@ class ProductFormDialog(QDialog):
         self.price_input.setSingleStep(10)
 
         self.category_combo = QComboBox()
-
         if self.categories:
             for cid, cname in self.categories.items():
                 self.category_combo.addItem(str(cname), cid)
         else:
-            # fallback placeholder so UI doesn't look broken
             self.category_combo.addItem("— No categories loaded —", None)
 
         self.min_stock_input = QSpinBox()
         self.min_stock_input.setRange(0, 99_999)
 
         self.details_input = QTextEdit()
+        self.details_input.setFixedHeight(90)
 
         form.addRow("Name:", self.name_input)
         form.addRow("Brand:", self.brand_input)
-        form.addRow("Price (₱, whole number):", self.price_input)
+        form.addRow("Price (₱):", self.price_input)
         form.addRow("Category:", self.category_combo)
         form.addRow("Min Stock Level:", self.min_stock_input)
         form.addRow("Details:", self.details_input)
 
-        layout.addLayout(form)
+        form_layout.addLayout(form)
+        root.addWidget(form_card)
 
-        # Buttons
         btn_row = QHBoxLayout()
         btn_row.addStretch()
 
@@ -80,16 +92,16 @@ class ProductFormDialog(QDialog):
 
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_save)
-        layout.addLayout(btn_row)
+        root.addLayout(btn_row)
 
         self.setStyleSheet("""
-            QDialog { background: #FFFFFF; }
-            QLabel { font-size: 13px; }
+            QDialog { background: #F7F9FC; }
             QLineEdit, QSpinBox, QComboBox, QTextEdit {
                 border-radius: 8px;
                 border: 1px solid #D3D8E5;
-                padding: 6px;
+                padding: 6px 8px;
                 font-size: 13px;
+                background: #FFFFFF;
             }
             QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QTextEdit:focus {
                 border: 1px solid #7FA2FF;
@@ -102,9 +114,7 @@ class ProductFormDialog(QDialog):
                 border-radius: 8px;
                 font-weight: 600;
             }
-            QPushButton#primaryBtn:hover {
-                background: #153AAB;
-            }
+            QPushButton#primaryBtn:hover { background: #153AAB; }
         """)
 
     def _populate(self):
@@ -114,9 +124,6 @@ class ProductFormDialog(QDialog):
         self.min_stock_input.setValue(int(self.product.get("min_stock_level", 0)))
         self.details_input.setPlainText(self.product.get("details", "") or "")
 
-        # We support both server styles:
-        # - product has category_id
-        # - product has category (name string)
         category_id = self.product.get("category_id")
         if category_id is not None:
             idx = self.category_combo.findData(category_id)
@@ -157,144 +164,210 @@ class ProductFormDialog(QDialog):
 
 
 # ===========================================
-# MAIN PRODUCT LIST PAGE
+# STOCK BATCHES DIALOG
+# ===========================================
+class StockBatchesDialog(QDialog):
+    def __init__(self, api, product: dict, parent=None):
+        super().__init__(parent)
+        self.api = api
+        self.product = product or {}
+        self.product_id = self.product.get("id")
+
+        name = self.product.get("name", "Product")
+        self.setWindowTitle(f"Stock Batches — {name}")
+        self.setMinimumWidth(900)
+        self.setMinimumHeight(520)
+
+        self._build_ui()
+        self._load_batches()
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 20, 20, 20)
+        root.setSpacing(14)
+
+        header_card = QFrame()
+        header_card.setObjectName("Card")
+        header_layout = QHBoxLayout(header_card)
+        header_layout.setContentsMargins(16, 14, 16, 14)
+
+        title = QLabel(self.product.get("name", "Product"))
+        title.setStyleSheet("font-size: 18px; font-weight: 800; color: #0A2A83;")
+
+        meta = QLabel(
+            f"ID: {self.product.get('id', '—')}    "
+            f"Brand: {self.product.get('brand', '—')}    "
+            f"Price: ₱{self.product.get('price', 0)}"
+        )
+        meta.setObjectName("muted")
+
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+        title_col.addWidget(title)
+        title_col.addWidget(meta)
+
+        header_layout.addLayout(title_col)
+        header_layout.addStretch()
+
+        btn_close = QPushButton("Close")
+        btn_close.setFixedHeight(32)
+        btn_close.clicked.connect(self.accept)
+        header_layout.addWidget(btn_close)
+
+        root.addWidget(header_card)
+
+        self.selector = StockBatchSelector(self.product_id or 0, parent=self)
+        self.selector.batches_updated.connect(self._load_batches)
+        root.addWidget(self.selector, 1)
+
+        self.setStyleSheet("""
+            QDialog { background: #F7F9FC; }
+            QPushButton {
+                border-radius: 8px;
+                padding: 0 12px;
+                font-size: 12px;
+                font-weight: 600;
+                border: 1px solid #D3D8E5;
+                background: #FFFFFF;
+            }
+            QPushButton:hover { background: #F3F6FF; }
+        """)
+
+    def _load_batches(self):
+        if not self.product_id:
+            QMessageBox.warning(self, "Error", "Invalid product ID.")
+            return
+
+        try:
+            result = self.api.get_stock_batches(self.product_id)
+
+            batches = []
+            if isinstance(result, dict):
+                batches = result.get("stock_batches", []) or result.get("batches", []) or []
+
+            self.selector.load_batches(batches)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load stock batches:\n{e}")
+            self.selector.load_batches([])
+
+
+# ===========================================
+# MAIN INVENTORY PAGE (CARD GRID)
 # ===========================================
 class ProductListPage(QWidget):
     def __init__(self, user_data=None, parent=None):
         super().__init__(parent)
 
         self.user = user_data or {}
-        self.api = StockaDoodleAPI()
-
-        self.current_page = 1
-        self.per_page = 10
-        self.total_pages = 1
+        self.api = get_api()
 
         self.category_map: dict[int, str] = {}
+        self.all_products: List[Dict[str, Any]] = []
+        self.filtered_products: List[Dict[str, Any]] = []
 
         self._build_ui()
         self._load_categories()
-        self.load_products()
+        self._load_all_products()
 
     # ---------------------------------------
     # UI BUILD
     # ---------------------------------------
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(32, 32, 32, 32)
+        root.setContentsMargins(40, 24, 40, 24)
         root.setSpacing(18)
 
-        # Header Row
-        header_row = QHBoxLayout()
-        title = QLabel("Products")
-        title.setStyleSheet("""
-            font-size: 22px;
-            font-weight: 700;
-        """)
-        header_row.addWidget(title)
-        header_row.addStretch()
+        # Header row
+        header = QHBoxLayout()
+        title = QLabel("Inventory")
+        title.setObjectName("title")
+        header.addWidget(title)
+
+        subtitle = QLabel("Manage products, pricing, categories, and stock batches.")
+        subtitle.setObjectName("muted")
+        header.addWidget(subtitle)
+
+        header.addStretch()
+
+        self.btn_add_category = QPushButton("Add Category")
+        self.btn_add_category.setIcon(get_feather_icon("folder-plus", 16))
+        self.btn_add_category.setFixedHeight(36)
+        self.btn_add_category.clicked.connect(self._open_add_category_dialog)
+        header.addWidget(self.btn_add_category)
 
         self.btn_add = QPushButton("Add Product")
         self.btn_add.setObjectName("primaryBtn")
         self.btn_add.setIcon(get_feather_icon("plus", 16))
-        self.btn_add.setFixedHeight(38)
+        self.btn_add.setFixedHeight(36)
         self.btn_add.clicked.connect(self._open_add_dialog)
-        header_row.addWidget(self.btn_add)
+        header.addWidget(self.btn_add)
 
-        root.addLayout(header_row)
+        root.addLayout(header)
 
-        # Table
-        self.table = QTableWidget()
-        self.table.setColumnCount(8)
-        self.table.setHorizontalHeaderLabels([
-            "ID", "Name", "Brand", "Category",
-            "Price (₱)", "Stock", "Min Stock", "Actions"
-        ])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        # Filter bar (replaces old global header search)
+        filter_card = QFrame()
+        filter_card.setObjectName("Card")
+        filter_layout = QHBoxLayout(filter_card)
+        filter_layout.setContentsMargins(14, 10, 14, 10)
+        filter_layout.setSpacing(10)
 
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setAlternatingRowColors(True)
+        filter_label = QLabel("Filter")
+        filter_label.setObjectName("CardTitle")
+        filter_layout.addWidget(filter_label)
 
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background: #FFFFFF;
-                border-radius: 14px;
-                border: 1px solid #DDE3EA;
-                gridline-color: #E3E8F5;
-            }
-            QHeaderView::section {
-                background-color: #F4F6FD;
-                padding: 6px;
-                border: none;
-                font-weight: 600;
-                font-size: 13px;
-            }
-            QTableWidget::item {
-                padding: 4px;
-                font-size: 13px;
-            }
-        """)
+        self.filter_input = QLineEdit()
+        self.filter_input.setPlaceholderText("Search by name, brand, or category (not case sensitive)")
+        self.filter_input.textChanged.connect(self._apply_filter)
+        filter_layout.addWidget(self.filter_input, 1)
 
-        root.addWidget(self.table)
+        self.btn_clear_filter = QPushButton("Clear")
+        self.btn_clear_filter.setFixedHeight(30)
+        self.btn_clear_filter.clicked.connect(lambda: self.filter_input.setText(""))
+        filter_layout.addWidget(self.btn_clear_filter)
 
-        # Pagination Row
-        pager_row = QHBoxLayout()
-        self.page_label = QLabel("Page 1 of 1")
-        self.page_label.setStyleSheet("font-size: 13px; color: #666;")
-        pager_row.addWidget(self.page_label)
+        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh.setFixedHeight(30)
+        self.btn_refresh.clicked.connect(self._load_all_products)
+        filter_layout.addWidget(self.btn_refresh)
 
-        pager_row.addStretch()
+        root.addWidget(filter_card)
 
-        self.btn_prev = QPushButton("Prev")
-        self.btn_next = QPushButton("Next")
+        # Grid card wrapper
+        grid_card = QFrame()
+        grid_card.setObjectName("Card")
+        grid_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        grid_card_layout = QVBoxLayout(grid_card)
+        grid_card_layout.setContentsMargins(12, 12, 12, 12)
+        grid_card_layout.setSpacing(8)
 
-        for btn in (self.btn_prev, self.btn_next):
-            btn.setFixedHeight(32)
+        card_title = QLabel("Products")
+        card_title.setObjectName("CardTitle")
+        grid_card_layout.addWidget(card_title)
 
-        self.btn_prev.clicked.connect(self.prev_page)
-        self.btn_next.clicked.connect(self.next_page)
+        # Scroll area with grid
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
 
-        pager_row.addWidget(self.btn_prev)
-        pager_row.addWidget(self.btn_next)
+        self.grid_host = QWidget()
+        self.grid = QGridLayout(self.grid_host)
+        self.grid.setContentsMargins(4, 4, 4, 4)
+        self.grid.setHorizontalSpacing(12)
+        self.grid.setVerticalSpacing(12)
 
-        root.addLayout(pager_row)
+        self.scroll.setWidget(self.grid_host)
+        grid_card_layout.addWidget(self.scroll, 1)
 
-        self.setStyleSheet("""
-            QPushButton#primaryBtn {
-                background: #0A2A83;
-                color: white;
-                border-radius: 8px;
-                padding: 0 18px;
-                font-weight: 600;
-            }
-            QPushButton#primaryBtn:hover {
-                background: #153AAB;
-            }
-        """)
+        root.addWidget(grid_card, 1)
 
     # ---------------------------------------
     # DATA LOADING
     # ---------------------------------------
     def _load_categories(self):
-        """
-        Cache category id -> name.
-
-        Handles both API styles:
-        1) returns a list
-        2) returns {"categories": [...]}
-        """
         try:
             cats = self.api.get_categories()
-
-            if isinstance(cats, dict):
-                cats_list = cats.get("categories", [])
-            else:
-                cats_list = cats or []
+            cats_list = cats if isinstance(cats, list) else cats.get("categories", []) or []
 
             self.category_map = {
                 c.get("id"): c.get("name", "Unknown")
@@ -305,140 +378,127 @@ class ProductListPage(QWidget):
         except Exception:
             self.category_map = {}
 
-    def load_products(self):
-        try:
-            result = self.api.get_products(page=self.current_page, per_page=self.per_page)
-            products = result.get("products", [])
+    def _load_all_products(self):
+        """
+        Since pagination UI is removed, we fetch a larger set.
+        We also attempt to walk pages if backend supports it.
+        """
+        products: List[Dict[str, Any]] = []
 
-            self.total_pages = result.get("pages", 1) or 1
-            self._populate_table(products)
+        try:
+            first = self.api.get_products(page=1, per_page=50)
+            products.extend(first.get("products", []) or [])
+            pages = int(first.get("pages", 1) or 1)
+
+            # Fetch remaining pages (bounded for safety)
+            max_pages = min(pages, 20)
+            for p in range(2, max_pages + 1):
+                res = self.api.get_products(page=p, per_page=50)
+                products.extend(res.get("products", []) or [])
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load products:\n{e}")
-            self._populate_table([])
+            products = []
 
-    def _populate_table(self, products: list[dict]):
-        self.table.setRowCount(0)
+        self.all_products = products
+        self._apply_filter()
 
-        for row_idx, product in enumerate(products):
-            self.table.insertRow(row_idx)
+    # ---------------------------------------
+    # FILTERING
+    # ---------------------------------------
+    def _apply_filter(self):
+        q = (self.filter_input.text() if hasattr(self, "filter_input") else "") or ""
+        q = q.strip().lower()
 
-            def set_item(col, text):
-                item = QTableWidgetItem(str(text))
-                item.setFlags(item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-                self.table.setItem(row_idx, col, item)
+        if not q:
+            self.filtered_products = list(self.all_products)
+            self._render_cards()
+            return
 
-            set_item(0, product.get("id", ""))
-            set_item(1, product.get("name", ""))
-            set_item(2, product.get("brand", ""))
+        def cat_name_for(p: Dict[str, Any]) -> str:
+            if p.get("category"):
+                return str(p.get("category"))
+            cid = p.get("category_id")
+            return str(self.category_map.get(cid, ""))
 
-            # Support both server keys:
-            # - category_id
-            # - category (name)
+        filtered = []
+        for p in self.all_products:
+            name = str(p.get("name", "")).lower()
+            brand = str(p.get("brand", "")).lower()
+            cat = cat_name_for(p).lower()
+
+            if q in name or q in brand or q in cat:
+                filtered.append(p)
+
+        self.filtered_products = filtered
+        self._render_cards()
+
+    # ---------------------------------------
+    # CARD RENDERER
+    # ---------------------------------------
+    def _clear_grid(self):
+        while self.grid.count():
+            item = self.grid.takeAt(0)
+            w = item.widget()
+            if w:
+                w.setParent(None)
+
+    def _render_cards(self):
+        self._load_categories()  # keep category names fresh
+        self._clear_grid()
+
+        items = self.filtered_products
+
+        # 3 cards per row
+        cols = 3
+        row = 0
+        col = 0
+
+        for product in items:
             cat_name = "—"
             if product.get("category"):
-                cat_name = product.get("category")
+                cat_name = str(product.get("category"))
             else:
                 cat_name = self.category_map.get(product.get("category_id"), "—")
 
-            set_item(3, cat_name)
+            card = ProductCard(
+                product=product,
+                category_name=cat_name,
+                on_edit=self._open_edit_dialog,
+                on_stock=self._open_stock_batches,
+                on_delete=self._confirm_delete
+            )
 
-            set_item(4, product.get("price", 0))
-            set_item(5, product.get("stock_level", 0))
-            set_item(6, product.get("min_stock_level", 0))
+            self.grid.addWidget(card, row, col)
 
-            # Actions column
-            actions_widget = QWidget()
-            h = QHBoxLayout(actions_widget)
-            h.setContentsMargins(0, 0, 0, 0)
-            h.setSpacing(6)
+            col += 1
+            if col >= cols:
+                col = 0
+                row += 1
 
-            # Edit button
-            btn_edit = QPushButton()
-            edit_icon = get_feather_icon("edit-2", 14)
-            if isinstance(edit_icon, QIcon) and not edit_icon.isNull():
-                btn_edit.setIcon(edit_icon)
-            else:
-                btn_edit.setText("Edit")
-
-            btn_edit.setFixedSize(34, 28)
-            btn_edit.setToolTip("Edit product")
-            btn_edit.setStyleSheet("""
-                QPushButton {
-                    border: 1px solid #D9E4FF;
-                    background: #F3F6FF;
-                    border-radius: 6px;
-                    font-size: 11px;
-                    padding: 0 6px;
-                }
-                QPushButton:hover {
-                    background: #E8EEFF;
-                }
-            """)
-            btn_edit.clicked.connect(lambda _, p=product: self._open_edit_dialog(p))
-
-            # Delete button
-            btn_delete = QPushButton()
-            del_icon = get_feather_icon("trash-2", 14)
-            if isinstance(del_icon, QIcon) and not del_icon.isNull():
-                btn_delete.setIcon(del_icon)
-            else:
-                btn_delete.setText("Del")
-
-            btn_delete.setFixedSize(34, 28)
-            btn_delete.setToolTip("Delete product")
-            btn_delete.setStyleSheet("""
-                QPushButton {
-                    border: 1px solid #FFD6D6;
-                    background: #FFF2F2;
-                    border-radius: 6px;
-                    font-size: 11px;
-                    padding: 0 6px;
-                    color: #8A1E1E;
-                }
-                QPushButton:hover {
-                    background: #FFE6E6;
-                }
-            """)
-            btn_delete.clicked.connect(lambda _, p=product: self._confirm_delete(p))
-
-            h.addWidget(btn_edit)
-            h.addWidget(btn_delete)
-            h.addStretch()
-
-            self.table.setCellWidget(row_idx, 7, actions_widget)
-
-        self.page_label.setText(f"Page {self.current_page} of {self.total_pages}")
-        self.btn_prev.setEnabled(self.current_page > 1)
-        self.btn_next.setEnabled(self.current_page < self.total_pages)
-
-    # ---------------------------------------
-    # PAGINATION
-    # ---------------------------------------
-    def next_page(self):
-        if self.current_page < self.total_pages:
-            self.current_page += 1
-            self.load_products()
-
-    def prev_page(self):
-        if self.current_page > 1:
-            self.current_page -= 1
-            self.load_products()
+        # Add a stretch spacer row
+        self.grid.setRowStretch(row + 1, 1)
 
     # ---------------------------------------
     # CRUD HANDLERS
     # ---------------------------------------
+    def _open_add_category_dialog(self):
+        dlg = CategoryFormDialog(self.api, parent=self)
+        if dlg.exec():
+            self._load_categories()
+            self._apply_filter()
+
     def _open_add_dialog(self):
+        self._load_categories()
         dlg = ProductFormDialog(self.api, self.category_map, parent=self)
         if dlg.exec():
-            self._load_categories()
-            self.load_products()
+            self._load_all_products()
 
     def _open_edit_dialog(self, product: dict):
+        self._load_categories()
         dlg = ProductFormDialog(self.api, self.category_map, product=product, parent=self)
         if dlg.exec():
-            self._load_categories()
-            self.load_products()
+            self._load_all_products()
 
     def _confirm_delete(self, product: dict):
         name = product.get("name", "this product")
@@ -451,6 +511,14 @@ class ProductListPage(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 self.api.delete_product(product.get("id"))
-                self.load_products()
+                self._load_all_products()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to delete product:\n{e}")
+
+    # ---------------------------------------
+    # STOCK BATCH ENTRY POINT
+    # ---------------------------------------
+    def _open_stock_batches(self, product: dict):
+        dlg = StockBatchesDialog(self.api, product, parent=self)
+        dlg.exec()
+        self._load_all_products()
