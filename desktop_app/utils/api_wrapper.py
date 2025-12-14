@@ -290,6 +290,15 @@ def undo_sale(sale_id: int, user_id: Optional[int] = None) -> Dict:
     return api.undo_sale(sale_id, user_id=user_id)
 
 
+def return_sale_item(sale_id: int, item_index: int, user_id: Optional[int] = None) -> Dict:
+    """Return ONE sold item row (removes that line + restores stock)."""
+    api = get_api()
+    fn = getattr(api, "return_sale_item", None)
+    if not callable(fn):
+        raise Exception("API client missing return_sale_item()")
+    return fn(sale_id, item_index, user_id=user_id)
+
+
 # -----------------------
 # Logs, reports & metrics
 # -----------------------
@@ -357,6 +366,25 @@ def get_user_accounts_report() -> Dict:
 def download_pdf_report(report_type: str, **params) -> bytes:
     api = get_api()
     return api.download_pdf_report(report_type, **params)
+
+
+# -----------------------
+# Dashboard helpers (new)
+# -----------------------
+
+def get_admin_dashboard() -> Dict:
+    api = get_api()
+    return api.get_admin_dashboard()
+
+
+def get_manager_dashboard() -> Dict:
+    api = get_api()
+    return api.get_manager_dashboard()
+
+
+def get_retailer_dashboard(user_id: int) -> Dict:
+    api = get_api()
+    return api.get_retailer_dashboard(user_id)
 
 
 # Notifications & health

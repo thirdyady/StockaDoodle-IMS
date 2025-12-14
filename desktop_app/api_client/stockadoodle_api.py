@@ -362,7 +362,7 @@ class StockaDoodleAPI:
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-        if retailer_id:
+        if retailer_id is not None:
             params["retailer_id"] = retailer_id
 
         result = self._request("GET", "/sales/reports", params=params)
@@ -376,6 +376,12 @@ class StockaDoodleAPI:
     def undo_sale(self, sale_id: int, user_id: Optional[int] = None) -> Dict[str, Any]:
         data = {"user_id": user_id or (self.current_user["id"] if self.current_user else None)}
         result = self._request("DELETE", f"/sales/{sale_id}", json=data)
+        return result  # type: ignore[return-value]
+
+    # ✅ NEW: Return ONE sold item row inside a Sale (sale_id + item_index)
+    def return_sale_item(self, sale_id: int, item_index: int, user_id: Optional[int] = None) -> Dict[str, Any]:
+        data = {"user_id": user_id or (self.current_user["id"] if self.current_user else None)}
+        result = self._request("DELETE", f"/sales/{sale_id}/items/{item_index}", json=data)
         return result  # type: ignore[return-value]
 
     # ================================================================
@@ -408,6 +414,24 @@ class StockaDoodleAPI:
         if target_entity:
             params["target_entity"] = target_entity
         result = self._request("GET", "/log/api", params=params)
+        return result  # type: ignore[return-value]
+
+    # ================================================================
+    # DASHBOARD (new)
+    # ================================================================
+    def get_admin_dashboard(self) -> Dict[str, Any]:
+        """Admin dashboard metrics."""
+        result = self._request("GET", "/dashboard/admin")
+        return result  # type: ignore[return-value]
+
+    def get_manager_dashboard(self) -> Dict[str, Any]:
+        """Manager dashboard metrics."""
+        result = self._request("GET", "/dashboard/manager")
+        return result  # type: ignore[return-value]
+
+    def get_retailer_dashboard(self, user_id: int) -> Dict[str, Any]:
+        """Retailer dashboard metrics for a specific user."""
+        result = self._request("GET", f"/dashboard/retailer/{user_id}")
         return result  # type: ignore[return-value]
 
     # ================================================================

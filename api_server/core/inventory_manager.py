@@ -3,6 +3,7 @@
 from models.product import Product
 from models.stock_batch import StockBatch
 from datetime import date
+from typing import List, Dict
 
 
 class InventoryError(Exception):
@@ -32,7 +33,7 @@ class InventoryManager:
     # --------------------------------------------------------------
     @staticmethod
     def validate_stock(product_id: int, qty_needed: int) -> bool:
-        """Raise InventoryError if stock is insufficient."""
+        """Raise InventoryError if Deducting would cause insufficient stock."""
         product = Product.objects(id=product_id).first()
         if not product:
             raise InventoryError("Product not found")
@@ -71,13 +72,21 @@ class InventoryManager:
         return batches
 
     # --------------------------------------------------------------
-    # Deduct stock FEFO-style
+    # Deduct stock FEFO-style (✅ now returns batch deductions)
     # --------------------------------------------------------------
     @staticmethod
-    def deduct_stock_fefo(product_id: int, qty_needed: int, user_id: int = None, reason: str = None) -> bool:
+    def deduct_stock_fefo(
+        product_id: int,
+        qty_needed: int,
+        user_id: int = None,
+        reason: str = None
+    ) -> List[Dict[str, int]]:
         """
         Deduct stock from batches based on earliest expiration date first.
         Batches with NULL expiration are deducted last.
+
+        ✅ Returns a list of deductions:
+            [{"batch_id": <int>, "quantity": <int>}, ...]
         """
         product = Product.objects(id=product_id).first()
         if not product:
@@ -86,6 +95,7 @@ class InventoryManager:
         batches = InventoryManager._get_fefo_batches(product_id)
 
         remaining = int(qty_needed)
+        deductions: List[Dict[str, int]] = []
 
         for batch in batches:
             if remaining <= 0:
@@ -94,17 +104,23 @@ class InventoryManager:
                 continue
 
             deduct_qty = min(int(batch.quantity), remaining)
-            batch.quantity = int(batch.quantity) - deduct_qty
-            remaining -= deduct_qty
+
+            batch.quantity = int(batch.quantity) - int(deduct_qty)
+            remaining -= int(deduct_qty)
             batch.reason = reason or batch.reason
             batch.save()
+
+            deductions.append({
+                "batch_id": int(batch.id),
+                "quantity": int(deduct_qty),
+            })
 
         if remaining > 0:
             raise InventoryError(
                 f"FEFO deduction failed — insufficient stock for product '{product.name}'"
             )
 
-        return True
+        return deductions
 
     # --------------------------------------------------------------
     # Deduct multiple products at once (e.g., during checkout)
@@ -119,6 +135,7 @@ class InventoryManager:
             InventoryManager.validate_stock(entry["product_id"], entry["quantity"])
 
         for entry in items:
+            # ignore the returned deductions here
             InventoryManager.deduct_stock_fefo(entry["product_id"], entry["quantity"])
 
         return True

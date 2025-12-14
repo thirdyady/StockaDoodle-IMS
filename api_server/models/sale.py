@@ -12,6 +12,21 @@ from mongoengine import (
 from datetime import datetime, timezone
 
 
+class SaleBatchDeduction(EmbeddedDocument):
+    """
+    Tracks how much quantity was deducted from a specific StockBatch
+    for a single SaleItem.
+    """
+    batch_id = IntField(required=True)
+    quantity = IntField(required=True, default=0)
+
+    def to_dict(self):
+        return {
+            "batch_id": int(self.batch_id),
+            "quantity": int(self.quantity or 0),
+        }
+
+
 class SaleItem(EmbeddedDocument):
     """
     Embedded sale line item.
@@ -30,11 +45,15 @@ class SaleItem(EmbeddedDocument):
     # price * qty for that item
     line_total = FloatField(default=0.0)
 
+    # ✅ NEW: track the original batches used (can be multiple if qty spans batches)
+    batch_deductions = ListField(EmbeddedDocumentField(SaleBatchDeduction), default=list)
+
     def to_dict(self):
         return {
             "product_id": self.product_id,
             "quantity": self.quantity,
-            "line_total": self.line_total
+            "line_total": self.line_total,
+            "batch_deductions": [d.to_dict() for d in (self.batch_deductions or [])],
         }
 
 

@@ -7,7 +7,11 @@ Goal:
 - Clean modern light UI
 - No accidental gray strips behind text
 - Standard objectNames:
-    title, Card, CardTitle, CardValue, primaryBtn, muted
+    title, Card, CardTitle, CardValue, primaryBtn, secondaryBtn, ghost, muted
+
+NOTE:
+- This theme is GLOBAL.
+- To avoid breaking other pages, we only add "compact table buttons" under QTableWidget scope.
 """
 
 def load_app_theme() -> str:
@@ -23,14 +27,10 @@ QWidget {
     background: #F6F8FC;
 }
 
-/* Prevent gray strips behind labels */
-QLabel {
-    background: transparent;
-}
+QLabel { background: transparent; }
+QAbstractButton, QToolButton { background: transparent; }
 
-QAbstractButton, QToolButton {
-    background: transparent;
-}
+QFrame { background: transparent; }
 
 /* Inputs */
 QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox {
@@ -44,6 +44,16 @@ QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus,
 QComboBox:focus, QSpinBox:focus {
     border: 1px solid #8CAFFF;
     background: #FFFFFF;
+}
+
+/* SpinBox arrows feel tighter */
+QSpinBox::up-button, QSpinBox::down-button {
+    width: 18px;
+    border: none;
+}
+QSpinBox::up-arrow, QSpinBox::down-arrow {
+    width: 8px;
+    height: 8px;
 }
 
 /* =========================================================
@@ -85,151 +95,16 @@ QLabel#CardValue {
 }
 
 /* =========================================================
-   HEADER BAR
-   ========================================================= */
-
-QWidget#headerBar {
-    background: #FFFFFF;
-    border-bottom: 1px solid #E6EAF3;
-}
-
-QLabel#headerTitle {
-    font-size: 20px;
-    font-weight: 900;
-    color: #0A2A83;
-}
-
-QPushButton#menuBtn {
-    background: #F4F7FF;
-    border: 1px solid #DEE6FF;
-    border-radius: 10px;
-}
-
-QPushButton#menuBtn:hover {
-    background: #EAF0FF;
-}
-
-QLineEdit#searchBox {
-    padding-left: 12px;
-    font-size: 13px;
-    border-radius: 12px;
-    border: 1px solid #D7DEEE;
-    background: #F8FAFF;
-}
-
-QLineEdit#searchBox:focus {
-    border: 1px solid #8CAFFF;
-    background: #FFFFFF;
-}
-
-QToolButton#profileBtn {
-    background: #0A2A83;
-    color: white;
-    border-radius: 10px;
-    font-weight: 800;
-    font-size: 12px;
-}
-
-QToolButton#profileBtn:hover {
-    background: #153AAB;
-}
-
-QMenu {
-    background: #FFFFFF;
-    border: 1px solid #CDD5EA;
-    border-radius: 10px;
-    padding: 6px 0;
-}
-
-QMenu::item {
-    padding: 8px 18px;
-    font-size: 12px;
-    font-weight: 600;
-}
-
-QMenu::item:selected {
-    background: #EEF3FF;
-}
-
-/* =========================================================
-   SIDEBAR
-   ========================================================= */
-
-QWidget#sidebar {
-    background: #FFFFFF;
-    border-right: 1px solid #E6EAF3;
-}
-
-QFrame#sidebarBrandCard {
-    background: #F6F8FF;
-    border: 1px solid #E3E9FF;
-    border-radius: 14px;
-}
-
-QLabel#sidebarBrand,
-QLabel#sidebarBrandSub,
-QLabel#sidebarSection,
-QLabel#sidebarName,
-QLabel#sidebarRole {
-    background: transparent;
-}
-
-QListWidget#sidebarMenu {
-    border: none;
-    outline: none;
-    background: transparent;
-}
-
-QListWidget#sidebarMenu::item {
-    margin-left: 2px;
-    padding-left: 12px;
-    border-radius: 12px;
-    font-size: 14px;
-    font-weight: 600;
-    height: 40px;
-    color: #23324D;
-    background: transparent;
-}
-
-QListWidget#sidebarMenu::item:hover {
-    background: #EEF3FF;
-}
-
-QListWidget#sidebarMenu::item:selected {
-    background: #0A2A83;
-    color: #FFFFFF;
-}
-
-QListWidget#sidebarMenu::item:disabled {
-    color: rgba(35, 50, 77, 0.28);
-    background: transparent;
-}
-
-QFrame#sidebarFooter {
-    background: #F8FAFF;
-    border: 1px solid #E5EBFF;
-    border-radius: 14px;
-    min-height: 72px;
-}
-
-QLabel#sidebarAvatar {
-    background: #0A2A83;
-    color: white;
-    border-radius: 10px;
-    font-size: 12px;
-    font-weight: 800;
-}
-
-/* =========================================================
    BUTTON SYSTEM
    ========================================================= */
 
 QPushButton {
     border-radius: 10px;
     padding: 8px 12px;
-    font-weight: 600;
+    font-weight: 700;
     border: 1px solid #D7DEEE;
     background: #FFFFFF;
+    min-height: 34px;
 }
 
 QPushButton:hover {
@@ -240,6 +115,7 @@ QPushButton#primaryBtn {
     background: #0A2A83;
     color: #FFFFFF;
     border: 1px solid #0A2A83;
+    min-height: 36px;
 }
 
 QPushButton#primaryBtn:hover {
@@ -247,10 +123,55 @@ QPushButton#primaryBtn:hover {
     border: 1px solid #153AAB;
 }
 
+QPushButton#secondaryBtn {
+    background: #EEF3FF;
+    color: #0A2A83;
+    border: 1px solid #CFE0FF;
+    min-height: 34px;
+}
+
+QPushButton#secondaryBtn:hover {
+    background: #E3ECFF;
+    border: 1px solid #BFD6FF;
+}
+
+QPushButton#ghost {
+    background: transparent;
+    color: #0F172A;
+    border: 1px solid rgba(15,23,42,0.10);
+    min-height: 34px;
+}
+
+QPushButton#ghost:hover {
+    background: #F4F7FF;
+}
+
 QPushButton:disabled {
     background: #F2F4F8;
     color: rgba(0, 0, 0, 0.35);
     border: 1px solid #E5E9F2;
+}
+
+/* =========================================================
+   COMPACT BUTTONS INSIDE TABLES ONLY
+   ========================================================= */
+
+QTableWidget QPushButton {
+    padding: 4px 10px;
+    min-height: 28px;
+    max-height: 28px;
+    margin: 0px;
+    border-radius: 8px;
+    font-weight: 700;
+}
+
+/* Keep your variants compact too */
+QTableWidget QPushButton#primaryBtn,
+QTableWidget QPushButton#secondaryBtn,
+QTableWidget QPushButton#ghost {
+    padding: 4px 10px;
+    min-height: 28px;
+    max-height: 28px;
 }
 
 /* =========================================================
@@ -267,29 +188,46 @@ QTableWidget {
 
 QHeaderView::section {
     background-color: #F4F6FD;
-    padding: 6px;
+    padding: 8px;
     border: none;
-    font-weight: 700;
+    font-weight: 800;
     font-size: 12px;
 }
 
 QTableWidget::item {
-    padding: 6px;
+    padding: 8px;
     background: transparent;
 }
 
-/* ✅ Selection fix (prevents white-out) */
-QTableWidget::item:selected {
-    background: #0A2A83;
-    color: #FFFFFF;
-}
-
+/* Selection */
+QTableWidget::item:selected,
 QTableWidget::item:selected:active {
     background: #0A2A83;
     color: #FFFFFF;
 }
 
 QTableWidget::item:hover {
+    background: #EEF3FF;
+}
+
+/* =========================================================
+   MENUS
+   ========================================================= */
+
+QMenu {
+    background: #FFFFFF;
+    border: 1px solid #CDD5EA;
+    border-radius: 10px;
+    padding: 6px 0;
+}
+
+QMenu::item {
+    padding: 8px 18px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QMenu::item:selected {
     background: #EEF3FF;
 }
 
@@ -312,5 +250,23 @@ QScrollBar::handle:vertical:hover {
 QScrollBar::add-line:vertical,
 QScrollBar::sub-line:vertical {
     height: 0px;
+}
+
+/* ✅ Horizontal scrollbar styling too */
+QScrollBar:horizontal {
+    height: 10px;
+    background: transparent;
+}
+QScrollBar::handle:horizontal {
+    background: #D9E2F5;
+    border-radius: 5px;
+    min-width: 30px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: #C9D5F0;
+}
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {
+    width: 0px;
 }
 """
