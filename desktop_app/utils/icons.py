@@ -1,164 +1,107 @@
-# icons.py
-#
-# This module provides utility functions for loading and manipulating icons, specifically
-# Feather icons from the assets/icons directory. It handles SVG and PNG icons with
-# optional color manipulation.
-#
-# Usage: Imported by UI modules that need to display icons with consistent styling.
+# desktop_app/utils/icons.py
 
 import os
-from PyQt6.QtGui import QIcon, QPixmap, QPainter
-from PyQt6.QtCore import QByteArray, Qt
+from typing import Optional
+
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
 from PyQt6.QtSvg import QSvgRenderer
-from utils.config import AppConfig
+from PyQt6.QtCore import QByteArray, Qt
 
 
-# Cache for loaded icons to improve performance
-_icon_cache = {}
+try:
+    from desktop_app.utils.config import AppConfig
+    _ICONS_DIR = getattr(
+        AppConfig,
+        "ICONS_DIR",
+        os.path.join(os.path.dirname(__file__), "..", "assets", "icons"),
+    )
+except Exception:
+    _ICONS_DIR = os.path.join(os.path.dirname(__file__), "..", "assets", "icons")
 
 
-def get_icon(icon_name: str, color: str = None, size: int = 24) -> QIcon:
+def _icon_path(name: str):
+    png = os.path.join(_ICONS_DIR, f"{name}.png")
+    svg = os.path.join(_ICONS_DIR, f"{name}.svg")
+    return png, svg
+
+
+def _tint_pixmap(pix: QPixmap, color: str) -> QPixmap:
     """
-    Load an icon from the assets/icons directory and optionally apply a color.
-    Supports both PNG and SVG formats, with SVG color manipulation.
-    
-    Args:
-        icon_name: Name of the icon file without extension (e.g., "user", "trash-2")
-        color: Optional color string (e.g., "#FF0000", "white") to apply to SVG icons
-        size: Desired size of the icon in pixels
-        
-    Returns:
-        QIcon: The loaded QIcon object, or empty QIcon if not found
+    Tint a pixmap with a solid color.
+    Works best for monochrome icons.
     """
-    # Create cache key
-    cache_key = f"{icon_name}_{color}_{size}"
-    if cache_key in _icon_cache:
-        return _icon_cache[cache_key]
-    
-    icon_path_png = os.path.join(AppConfig.ICONS_DIR, f"{icon_name}.png")
-    icon_path_svg = os.path.join(AppConfig.ICONS_DIR, f"{icon_name}.svg")
-    
-    # Try PNG first (faster rendering)
-    if os.path.exists(icon_path_png):
-        icon = QIcon(icon_path_png)
-        if size != 24:
-            pixmap = icon.pixmap(size, size)
-            icon = QIcon(pixmap)
-        _icon_cache[cache_key] = icon
-        return icon
-    
-    # Fallback to SVG
-    elif os.path.exists(icon_path_svg):
-        icon = _load_svg_icon(icon_path_svg, color, size)
-        if icon:
-            _icon_cache[cache_key] = icon
-            return icon
-    
-    # Icon not found
-    print(f"Warning: Icon '{icon_name}' not found in {AppConfig.ICONS_DIR}")
+    if pix.isNull():
+        return pix
+
+    tinted = QPixmap(pix.size())
+    tinted.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(tinted)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+
+    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+    painter.drawPixmap(0, 0, pix)
+    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+    painter.fillRect(tinted.rect(), QColor(color))
+    painter.end()
+
+    return tinted
+
+
+def get_icon(icon_name: str, size: int = 24, color: Optional[str] = None) -> QIcon:
+    """
+    Generic icon loader.
+
+    - Tries PNG first (optionally tinted)
+    - Then tries SVG (optionally stroke/fill tinted)
+    - Silent fallback on failure
+    """
+    png, svg = _icon_path(icon_name)
+
+    # ---------------------------
+    # PNG
+    # ---------------------------
+    if os.path.exists(png):
+        try:
+            pix = QPixmap(png)
+            if not pix.isNull():
+                if size:
+                    pix = pix.scaled(
+                        size, size,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+
+                if color:
+                    pix = _tint_pixmap(pix, color)
+
+                return QIcon(pix)
+        except Exception:
+            return QIcon(png)
+
+    # ---------------------------
+    # SVG
+    # ---------------------------
+    if os.path.exists(svg):
+        try:
+            with open(svg, "r", encoding="utf-8") as f:
+                svg_text = f.read()
+
+            if color:
+                svg_text = svg_text.replace('stroke="currentColor"', f'stroke="{color}"')
+                svg_text = svg_text.replace('fill="currentColor"', f'fill="{color}"')
+
+            renderer = QSvgRenderer(QByteArray(svg_text.encode("utf-8")))
+            pix = QPixmap(size, size)
+            pix.fill(Qt.GlobalColor.transparent)
+
+            painter = QPainter(pix)
+            renderer.render(painter)
+            painter.end()
+
+            return QIcon(pix)
+        except Exception:
+            return QIcon(svg)
+
     return QIcon()
-
-
-def _load_svg_icon(svg_path: str, color: str = None, size: int = 24) -> QIcon:
-    """
-    Load and optionally colorize an SVG icon.
-    
-    Args:
-        svg_path: Path to the SVG file
-        color: Optional color to apply
-        size: Desired icon size
-        
-    Returns:
-        QIcon: The loaded and processed icon
-    """
-    try:
-        # Read SVG content
-        with open(svg_path, 'r', encoding='utf-8') as f:
-            svg_content = f.read()
-        
-        # Apply color if specified
-        if color:
-            # Replace stroke and fill colors with the specified color
-            # Common patterns in Feather icons
-            svg_content = svg_content.replace('stroke="currentColor"', f'stroke="{color}"')
-            svg_content = svg_content.replace('stroke="#000"', f'stroke="{color}"')
-            svg_content = svg_content.replace('stroke="#000000"', f'stroke="{color}"')
-            svg_content = svg_content.replace('fill="currentColor"', f'fill="{color}"')
-            svg_content = svg_content.replace('fill="#000"', f'fill="{color}"')
-            svg_content = svg_content.replace('fill="#000000"', f'fill="{color}"')
-        
-        # Render SVG to pixmap
-        renderer = QSvgRenderer(QByteArray(svg_content.encode('utf-8')))
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        
-        painter = QPainter(pixmap)
-        renderer.render(painter)
-        painter.end()
-        
-        return QIcon(pixmap)
-    
-    except Exception as e:
-        print(f"Error loading SVG icon {svg_path}: {e}")
-        # Fallback: try loading as regular icon
-        return QIcon(svg_path)
-
-
-def get_feather_icon(icon_name: str, color: str = None, size: int = 24) -> QIcon:
-    """
-    Alias for get_icon() for backward compatibility and clarity.
-    Specifically loads Feather icons from the assets/icons directory.
-    
-    Args:
-        icon_name: Name of the Feather icon without extension
-        color: Optional color to apply
-        size: Desired icon size in pixels
-        
-    Returns:
-        QIcon: The loaded icon
-    """
-    return get_icon(icon_name, color, size)
-
-
-def preload_common_icons(size: int = 24):
-    """
-    Preload commonly used icons into the cache for better performance.
-    
-    Args:
-        size: Size for the preloaded icons
-    """
-    common_icons = [
-        "home", "package", "dollar-sign", "users", "settings", "log-out",
-        "plus", "edit", "trash-2", "search", "filter", "calendar",
-        "chevron-down", "chevron-up", "chevron-left", "chevron-right",
-        "x", "check", "alert-circle", "info", "check-circle", "x-circle",
-        "user", "bell", "menu", "grid", "list", "download", "upload",
-        "image", "file-text", "pie-chart", "bar-chart", "trending-up"
-    ]
-    
-    for icon_name in common_icons:
-        get_icon(icon_name, None, size)
-
-
-def clear_icon_cache():
-    """Clear the icon cache to free memory."""
-    global _icon_cache
-    _icon_cache.clear()
-
-
-def get_icon_list() -> list:
-    """
-    Get a list of all available icons in the icons directory.
-    
-    Returns:
-        List of icon names (without extension)
-    """
-    icons = []
-    if os.path.exists(AppConfig.ICONS_DIR):
-        for filename in os.listdir(AppConfig.ICONS_DIR):
-            if filename.endswith(('.svg', '.png')):
-                icon_name = os.path.splitext(filename)[0]
-                if icon_name not in icons:
-                    icons.append(icon_name)
-    return sorted(icons)
-

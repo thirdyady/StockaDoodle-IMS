@@ -1,12 +1,15 @@
+# api_server/models/product.py
+
 from .base import BaseDocument
 from mongoengine import StringField, IntField, BinaryField
+
 
 class Product(BaseDocument):
     meta = {
         'collection': 'products',
         'ordering': ['name']
-        }
-    
+    }
+
     # name of the product, must be unique
     name = StringField(max_length=120, unique=True, required=True)
 
@@ -16,36 +19,55 @@ class Product(BaseDocument):
     # price as whole number
     price = IntField(required=True)
 
-    # link to a category
-    category_id = IntField(required=True)
-    
+    # link to a category (NOW OPTIONAL to match routes + UI)
+    category_id = IntField(required=False, null=True)
+
     # lowest allowed stock before warning
     min_stock_level = IntField(default=10)
 
     # this stores the product picture
     product_image = BinaryField()
-    
+
     # longer description of the product, optional
     details = StringField(max_length=250)
 
     @property
     def stock_level(self):
+        """
+        Computed from StockBatch documents.
+        This is your real source of truth for inventory.
+        """
         from .stock_batch import StockBatch
-        # this adds all batch quantities together
-        return sum((batch.quantity or 0) for batch in StockBatch.objects(product_id=self.id))
-    
+        batches = StockBatch.objects(product_id=self.id)
+        total = 0
+        for batch in batches:
+            try:
+                total += int(batch.quantity or 0)
+            except Exception:
+                total += 0
+        return total
+
     @property
     def category(self):
         from .category import Category
-        return Category.objects(id=self.category_id).first()
+        return Category.objects(id=self.category_id).first() if self.category_id else None
 
     def to_dict(self, include_image=False, include_batches=False):
+        category_obj = self.category
+
         data = {
             "id": self.id,
             "name": self.name,
             "brand": self.brand or "",
             "price": self.price,
-            "category": self.category.name if self.category else None,
+
+            # keep both for UI safety
+            "category_id": self.category_id,
+            "category": category_obj.name if category_obj else None,
+
+            # explicit alias for clarity (non-breaking)
+            "category_name": category_obj.name if category_obj else None,
+
             "stock_level": self.stock_level,
             "min_stock_level": self.min_stock_level,
             "details": self.details or "",
@@ -53,12 +75,15 @@ class Product(BaseDocument):
         }
 
         if include_image and self.product_image:
-            # send image as binary data
             data["image_data"] = self.product_image
 
         if include_batches:
             from .stock_batch import StockBatch
-            # include the list of all stock batches
-            data["batches"] = [batch.to_dict() for batch in StockBatch.objects(product_id=self.id)]
+            # predictable order: exp earliest first, then added_at, then id
+            batches = (
+                StockBatch.objects(product_id=self.id)
+                .order_by("expiration_date", "added_at")
+            )
+            data["batches"] = [batch.to_dict() for batch in batches]
 
         return data

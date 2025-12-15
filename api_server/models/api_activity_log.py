@@ -1,15 +1,18 @@
+from datetime import datetime
+
 from mongoengine import StringField, DateTimeField, ReferenceField
+
 from .base import BaseDocument
 from .user import User
-from datetime import datetime
+
 
 class APIActivityLog(BaseDocument):
     meta = {
         'collection': 'api_activity_logs',
         'ordering': ['-timestamp']
-        }
-    
-    # http method like POST or GET
+    }
+
+    # http method like POST or GET or DESKTOP
     method = StringField(max_length=10, required=True)
 
     # the target entity name like product or user
@@ -29,12 +32,13 @@ class APIActivityLog(BaseDocument):
 
     def to_dict(self):
         return {
-            "id": self.id,
+            "id": str(self.id),
             "method": self.method,
             "target": self.target_entity,
+            "target_entity": self.target_entity,  # extra-friendly key
             "source": self.source,
-            "user_id": self.user.id if self.user else None,
+            "user_id": int(self.user.id) if self.user else None,  # may be ObjectId-like in mongoengine; keep safe cast
             "user_name": self.user.full_name if self.user else "System",
             "details": self.details,
-            "timestamp": self.timestamp.isoformat()
+            "timestamp": self.timestamp.isoformat() if self.timestamp else ""
         }

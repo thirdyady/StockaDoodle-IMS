@@ -1,55 +1,79 @@
-"""
-StockaDoodle Inventory Management System - Main Application Entry Point
-
-This module initializes and runs the StockaDoodle IMS desktop application.
-Handles application setup, window management, and the main event loop.
-"""
-
 import sys
 import os
-from PyQt6.QtWidgets import QApplication
+import traceback
+from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QIcon
 
-from utils.config import AppConfig
-from ui.login_window import LoginWindow
+from desktop_app.ui.login_window import LoginWindow
+from desktop_app.ui.main_window import MainWindow
+
+from desktop_app.utils.app_state import set_current_user
+from desktop_app.utils.style_presets import get_global_stylesheet
+
+
+def show_crash_dialog(exc_type, exc_value, exc_traceback):
+    msg = QMessageBox()
+    msg.setWindowTitle("🚨 Application Crash")
+    msg.setIcon(QMessageBox.Icon.Critical)
+
+    tb = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    print("\n\n---------------- APPLICATION CRASHED ----------------")
+    print(tb)
+
+    msg.setText("The application crashed due to an error.")
+    msg.setDetailedText(tb)
+    msg.exec()
+
+
+# Catch exceptions anywhere in the Qt loop
+sys.excepthook = show_crash_dialog
+
+# IMPORTANT — holds main window so app doesn't close
+_app_main_window_ref = None
+
+
+def on_login_successful(user_data: dict):
+    global _app_main_window_ref
+
+    print(">>> LOGIN SUCCESSFUL:", user_data)
+    set_current_user(user_data)
+
+    try:
+        main_window = MainWindow(user_data)
+
+        # STORE IT HERE
+        _app_main_window_ref = main_window
+
+        main_window.show()
+
+    except Exception as e:
+        print("❌ ERROR WHILE OPENING MAIN WINDOW:", str(e))
+        raise e
 
 
 def main():
-    """
-    Main application entry point.
-    """
-    # Create QApplication with StockaDoodle branding
     app = QApplication(sys.argv)
-    app.setApplicationName("StockaDoodle")
-    app.setApplicationVersion("1.0.0")
-    app.setOrganizationName("StockaDoodle Inc.")
 
-    # Set window icon
-    icon_path = "../desktop_app/assets/icons/stockadoodle-transparent.png"
+    # ✅ Apply ONE global stylesheet once
+    # Login/MFA can still apply dialog-specific styles locally if needed
+    try:
+        app.setStyleSheet(get_global_stylesheet())
+    except Exception as e:
+        print("[WARNING] Failed to apply global stylesheet:", e)
+
+    # Global icon
+    icon_path = os.path.join(
+        os.path.dirname(__file__), "assets", "icons", "stockadoodle-transparent.png"
+    )
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
+    else:
+        print("[WARNING] App icon missing at:", icon_path)
 
-    # Note: High DPI scaling is enabled by default in PyQt6
-
-    # Create and show login window
     login_window = LoginWindow()
-
-    # Handle successful login
-    def on_login_successful(user_data):
-        """Handle successful login by transitioning to main application."""
-        print(f"Login successful for user: {user_data.get('username')}")
-        # TODO: Create and show main window here
-        # main_window = MainWindow(user_data)
-        # main_window.show()
-        # login_window.hide()
-
-        # For now, just close the login window
-        login_window.close()
-
     login_window.login_successful.connect(on_login_successful)
     login_window.show()
 
-    # Start event loop
     sys.exit(app.exec())
 
 

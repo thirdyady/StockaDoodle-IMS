@@ -1,224 +1,258 @@
-"""
-StockaDoodle Inventory Management System - Login Window
+# desktop_app/ui/login_window.py
 
-Features:
-- Clean, modern UI with StockaDoodle branding
-- API-based authentication via StockaDoodleAPI client
-- MFA flow for Admin/Manager roles
-- Responsive design with proper error handling
-"""
 import os
+
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QLineEdit,
-    QPushButton, QMessageBox, QSpacerItem, QSizePolicy
+    QWidget,
+    QVBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QMessageBox,
+    QSpacerItem,
+    QSizePolicy,
+    QHBoxLayout,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QIcon
 
-from api_client.stockadoodle_api import StockaDoodleAPI
-from utils.helpers import get_feather_icon
-from utils.styles import get_dialog_style
-from utils.config import AppConfig
+from desktop_app.api_client.stockadoodle_api import StockaDoodleAPI
+from desktop_app.utils.helpers import get_feather_icon
+from desktop_app.utils.config import AppConfig  # kept for future use / consistency
+from desktop_app.utils.styles import get_dialog_style
+
+# ✅ IMPORTANT: use the shared singleton API + app state
+from desktop_app.utils.api_wrapper import get_api
+from desktop_app.utils.app_state import set_current_user
 
 
 class LoginWindow(QWidget):
-    """
-    Login window for StockaDoodle IMS with API authentication and MFA support.
-    """
-
     login_successful = pyqtSignal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("StockaDoodle - Inventory Management System")
-        self.setFixedSize(400, 600)
+        self.setFixedSize(420, 640)
+        self.setObjectName("loginWindow")
+
+        icon_path = os.path.join(
+            os.path.dirname(__file__), "..", "assets", "icons", "stockadoodle-transparent.png"
+        )
+        if os.path.exists(icon_path):
+            try:
+                self.setWindowIcon(QIcon(icon_path))
+            except Exception:
+                pass
+
+        # Local client (kept)
+        self.api_client = StockaDoodleAPI()
+
+        self.attempted_user: dict | None = None
+
         self.setStyleSheet(get_dialog_style())
 
-        # Set window icon
-        icon_path = "../desktop_app/assets/icons/stockadoodle-transparent.png"
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        self._init_ui()
 
-        # Initialize API client
-        self.api_client = StockaDoodleAPI()
-        self.attempted_user = None
-
-        self.init_ui()
-
-    def init_ui(self):
-        """Initialize the login window UI components."""
+    def _init_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(40, 40, 40, 40)
-        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(36, 28, 36, 28)
+        main_layout.setSpacing(18)
 
         # Logo
+        logo_wrap = QHBoxLayout()
         logo_label = QLabel()
-        logo_path = "../desktop_app/assets/icons/stockadoodle-transparent.png"
+        logo_path = os.path.join(
+            os.path.dirname(__file__), "..", "assets", "icons", "stockadoodle-transparent.png"
+        )
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path).scaled(
-                120, 120, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
+                120,
+                120,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
             )
             logo_label.setPixmap(pixmap)
         else:
             logo_label.setText("StockaDoodle")
-            logo_label.setStyleSheet("font-size: 32pt; font-weight: bold; color: #2563EB;")
-        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(logo_label)
 
-        # Title
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_wrap.addStretch()
+        logo_wrap.addWidget(logo_label)
+        logo_wrap.addStretch()
+        main_layout.addLayout(logo_wrap)
+
+        # Title + subtitle
         title = QLabel("Welcome Back!")
+        title.setObjectName("loginTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet(f"font-size: 24pt; font-weight: bold; color: {AppConfig.LIGHT_TEXT};")
         main_layout.addWidget(title)
 
         subtitle = QLabel("Sign in to your StockaDoodle account")
+        subtitle.setObjectName("loginSubtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setStyleSheet(f"color: {AppConfig.TEXT_COLOR_ALT}; font-size: 12pt;")
         main_layout.addWidget(subtitle)
 
-        main_layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, 
-                                               QSizePolicy.Policy.Fixed))
+        main_layout.addSpacerItem(
+            QSpacerItem(20, 18, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        )
 
-        # Username field
+        # Username
         self.username_input = QLineEdit()
+        self.username_input.setObjectName("loginInput")
         self.username_input.setPlaceholderText("Username")
-        self.username_input.setMinimumHeight(45)
+        self.username_input.setMinimumHeight(44)
         main_layout.addWidget(self.username_input)
 
-        # Password field
+        # Password
         self.password_input = QLineEdit()
+        self.password_input.setObjectName("loginInput")
         self.password_input.setPlaceholderText("Password")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password_input.setMinimumHeight(45)
+        self.password_input.setMinimumHeight(44)
         main_layout.addWidget(self.password_input)
+
+        # Forgot row placeholder
+        forgot_row = QHBoxLayout()
+        forgot_row.addStretch()
+        forgot_lbl = QLabel("")
+        forgot_lbl.setObjectName("loginSmall")
+        forgot_row.addWidget(forgot_lbl)
+        main_layout.addLayout(forgot_row)
 
         # Login button
         self.login_btn = QPushButton("Sign In")
-        self.login_btn.setIcon(get_feather_icon("log-in", size=18))
-        self.login_btn.setMinimumHeight(50)
+        self.login_btn.setObjectName("loginBtn")
+        self.login_btn.setIcon(get_feather_icon("log-in", size=16))
+        self.login_btn.setMinimumHeight(48)
         self.login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.login_btn.clicked.connect(self.handle_login)
         main_layout.addWidget(self.login_btn)
 
+        main_layout.addStretch()
+
         # Footer
         footer = QLabel("© 2025 StockaDoodle Inventory System")
+        footer.setObjectName("loginFooter")
         footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        footer.setStyleSheet(f"color: rgba(255,255,255,0.4); font-size: 10pt;")
-        main_layout.addStretch()
         main_layout.addWidget(footer)
 
-        # Allow Enter key to trigger login
         self.password_input.returnPressed.connect(self.login_btn.click)
 
+    # -------------------
+    # Logic
+    # -------------------
     def handle_login(self):
-        """Handle login button click - authenticate via API."""
         username = self.username_input.text().strip()
         password = self.password_input.text().strip()
 
         if not username or not password:
-            QMessageBox.warning(self, "Input Required", 
-                              "Please enter both username and password.")
+            QMessageBox.warning(self, "Input Required", "Please enter both username and password.")
             return
 
-        self.login_btn.setEnabled(False)
-        self.login_btn.setText("Signing in...")
+        self._set_busy(True)
 
         try:
-            # Attempt login via API
             result = self.api_client.login(username, password)
 
-            # Check if MFA is required
-            if result.get('mfa_required'):
-                # MFA required - build user dict from individual fields
+            if result.get("mfa_required"):
                 self.attempted_user = {
-                    'id': result.get('user_id'),
-                    'username': result.get('username'),
-                    'role': result.get('role'),
-                    'email': result.get('email')
+                    "id": result.get("user_id"),
+                    "username": result.get("username") or username,
+                    "role": result.get("role"),
+                    "email": result.get("email"),
+                    "full_name": result.get("full_name", ""),
                 }
-                
-                if not self.attempted_user.get('username'):
-                    QMessageBox.critical(self, "Login Error", 
-                                       "Invalid login response from server.")
-                    self.reset_login_button()
-                    return
+                self._request_mfa()
 
-                self.request_mfa()
             else:
-                # Direct login successful (for staff/retailer)
-                user = result.get('user')
+                user = result.get("user")
                 if user:
+                    # ✅ store globally before emitting success
+                    self._broadcast_login(user)
                     self.login_successful.emit(user)
                     self.close()
                 else:
-                    QMessageBox.critical(self, "Login Error", 
-                                       "Invalid login response from server.")
-                    self.reset_login_button()
+                    QMessageBox.critical(
+                        self, "Login Error", "Invalid login response from server."
+                    )
+                    self._set_busy(False)
 
         except Exception as e:
-            error_msg = str(e)
-            QMessageBox.critical(self, "Login Failed", 
-                               f"Authentication failed:\n{error_msg}")
-            self.reset_login_button()
+            QMessageBox.critical(self, "Login Failed", f"Authentication failed:\n{str(e)}")
+            self._set_busy(False)
 
-    def request_mfa(self):
-        """Initiate MFA flow for privileged users (Admin/Manager)."""
-        email = self.attempted_user.get('email')
+    def _request_mfa(self):
+        if not self.attempted_user:
+            QMessageBox.critical(self, "MFA Error", "No user data available for MFA.")
+            self._set_busy(False)
+            return
+
+        email = self.attempted_user.get("email")
         if not email:
-            QMessageBox.critical(self, "MFA Error", 
-                               "No email configured for this account.")
-            self.reset_login_button()
+            QMessageBox.critical(self, "MFA Error", "No email configured for this account.")
+            self._set_busy(False)
             return
 
         try:
-            # Send MFA code via API
-            result = self.api_client.send_mfa_code(
-                self.attempted_user['username'],
-                email
-            )
-
+            self.api_client.send_mfa_code(self.attempted_user["username"], email)
             QMessageBox.information(
-                self,
-                "MFA Required",
-                f"A 6-digit verification code has been sent to {email}"
+                self, "MFA Required", f"A verification code has been sent to {email}"
             )
 
-            # Show MFA dialog
-            from ui.mfa_window import MFAWindow
+            from desktop_app.ui.mfa_window import MFAWindow
+
             mfa_dialog = MFAWindow(self.attempted_user, parent=self)
             mfa_dialog.mfa_verified.connect(self.on_mfa_success)
+
+            # ✅ IMPORTANT: if user cancels MFA, re-enable login button
+            mfa_dialog.rejected.connect(lambda: self._set_busy(False))
+
             mfa_dialog.exec()
 
         except Exception as e:
-            QMessageBox.critical(self, "MFA Failed", 
-                               f"Could not send MFA code:\n{str(e)}")
-            self.reset_login_button()
+            QMessageBox.critical(self, "MFA Failed", f"Could not send MFA code:\n{str(e)}")
+            self._set_busy(False)
 
-    def on_mfa_success(self, verified_user):
-        """Handle successful MFA verification."""
+    def on_mfa_success(self, verified_user: dict):
+        # ✅ store globally before emitting success
+        self._broadcast_login(verified_user)
         self.login_successful.emit(verified_user)
         self.close()
 
-    def reset_login_button(self):
-        """Reset login button to default state."""
-        self.login_btn.setEnabled(True)
-        self.login_btn.setText("Sign In")
+    # -------------------
+    # State sync
+    # -------------------
+    def _broadcast_login(self, user: dict):
+        """
+        Ensure ALL parts of the desktop app can see the logged-in user:
 
-    def mousePressEvent(self, event):
-        """Allow dragging the window."""
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.old_pos = event.globalPosition().toPoint()
+        1) local LoginWindow client
+        2) shared singleton client used by pages
+        3) AppState singleton (signals + global UI)
+        """
+        # 1) local client
+        try:
+            self.api_client.current_user = user
+        except Exception:
+            pass
 
-    def mouseReleaseEvent(self, event):
-        """Handle mouse release for window dragging."""
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.old_pos = None
+        # 2) shared singleton API
+        try:
+            shared_api = get_api()
+            shared_api.current_user = user
+        except Exception:
+            pass
 
-    def mouseMoveEvent(self, event):
-        """Handle window dragging."""
-        if not hasattr(self, 'old_pos') or not self.old_pos:
-            return
-        delta = event.globalPosition().toPoint() - self.old_pos
-        self.move(self.pos() + delta)
-        self.old_pos = event.globalPosition().toPoint()
+        # 3) global app state
+        try:
+            set_current_user(user)
+        except Exception:
+            pass
+
+    def _set_busy(self, busy: bool):
+        if busy:
+            self.login_btn.setEnabled(False)
+            self.login_btn.setText("Signing in...")
+        else:
+            self.login_btn.setEnabled(True)
+            self.login_btn.setText("Sign In")
