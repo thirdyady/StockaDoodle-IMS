@@ -1,3 +1,4 @@
+import base64
 from werkzeug.security import generate_password_hash, check_password_hash
 from mongoengine import StringField, EmailField, BooleanField, DateTimeField, BinaryField
 from .base import BaseDocument
@@ -53,6 +54,6 @@ class User(BaseDocument):
 
         if include_image and self.user_image:
             # return user image as binary data
-            data["image_data"] = self.user_image
+            data["image_data"] = base64.b64encode(self.user_image).decode('utf-8')
 
         return data

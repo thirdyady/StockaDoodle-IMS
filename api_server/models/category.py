@@ -1,3 +1,4 @@
+import base64
 from mongoengine import StringField, BinaryField
 from .base import BaseDocument
 
@@ -25,6 +26,6 @@ class Category(BaseDocument):
         
         if include_image and self.category_image:
             # return image as binary data
-            data['image_data'] = self.category_image
+            data['image_data'] = base64.b64encode(self.category_image).decode('utf-8')
         
         return data

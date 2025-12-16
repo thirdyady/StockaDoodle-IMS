@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QDialog, QFormLayout, QLineEdit, QSpinBox, QTextEdit, QComboBox,
-    QMessageBox, QFrame, QSizePolicy, QScrollArea, QGridLayout
+    QMessageBox, QFrame, QSizePolicy, QScrollArea, QGridLayout,
+    QFileDialog, QSpacerItem
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import Qt, QTimer, QEvent
+from PyQt6.QtGui import QPixmap
 
 from desktop_app.utils.helpers import get_feather_icon
 from desktop_app.utils.api_wrapper import get_api
@@ -21,7 +22,7 @@ from desktop_app.ui.components.category_form_dialog import CategoryFormDialog
 
 
 # ===========================================
-# PRODUCT FORM DIALOG (ADD / EDIT)
+# PRODUCT FORM DIALOG (ADD / EDIT) + IMAGE
 # ===========================================
 class ProductFormDialog(QDialog):
     def __init__(self, api, categories: dict, product: dict | None = None, parent=None):
@@ -29,6 +30,9 @@ class ProductFormDialog(QDialog):
         self.api = api
         self.categories = categories or {}
         self.product = product
+
+        self.selected_image_bytes: bytes | None = None
+        self.selected_image_path: str | None = None
 
         self.setWindowTitle("Edit Product" if product else "Add Product")
         self.setMinimumWidth(440)
@@ -70,12 +74,38 @@ class ProductFormDialog(QDialog):
         self.details_input = QTextEdit()
         self.details_input.setFixedHeight(90)
 
+        # --- Image preview + button (replace-only) ---
+        img_row = QHBoxLayout()
+        img_row.setSpacing(10)
+
+        self.img_preview = QLabel("No Image")
+        self.img_preview.setFixedSize(90, 90)
+        self.img_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.img_preview.setStyleSheet("""
+            QLabel {
+                background: #F8FAFF;
+                border: 1px dashed #D7DEEE;
+                border-radius: 10px;
+                color: rgba(15,23,42,0.45);
+                font-size: 11px;
+                font-weight: 600;
+            }
+        """)
+
+        self.btn_choose_image = QPushButton("Choose Image")
+        self.btn_choose_image.setFixedHeight(32)
+        self.btn_choose_image.clicked.connect(self._choose_image)
+
+        img_row.addWidget(self.img_preview, 0)
+        img_row.addWidget(self.btn_choose_image, 1)
+
         form.addRow("Name:", self.name_input)
         form.addRow("Brand:", self.brand_input)
         form.addRow("Price (₱):", self.price_input)
         form.addRow("Category:", self.category_combo)
         form.addRow("Min Stock Level:", self.min_stock_input)
         form.addRow("Details:", self.details_input)
+        form.addRow("Image:", img_row)
 
         form_layout.addLayout(form)
         root.addWidget(form_card)
@@ -117,6 +147,46 @@ class ProductFormDialog(QDialog):
             QPushButton#primaryBtn:hover { background: #153AAB; }
         """)
 
+    def _set_preview_from_bytes(self, blob: bytes | None):
+        if not blob:
+            self.img_preview.setText("No Image")
+            self.img_preview.setPixmap(QPixmap())
+            return
+
+        pix = QPixmap()
+        ok = pix.loadFromData(blob)
+        if not ok or pix.isNull():
+            self.img_preview.setText("Invalid")
+            self.img_preview.setPixmap(QPixmap())
+            return
+
+        pix = pix.scaled(
+            self.img_preview.width(),
+            self.img_preview.height(),
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.img_preview.setText("")
+        self.img_preview.setPixmap(pix)
+
+    def _choose_image(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose Product Image",
+            "",
+            "Images (*.png *.jpg *.jpeg *.webp *.gif);;All Files (*.*)"
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "rb") as f:
+                self.selected_image_bytes = f.read()
+            self.selected_image_path = path
+            self._set_preview_from_bytes(self.selected_image_bytes)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to read image:\n{e}")
+
     def _populate(self):
         self.name_input.setText(self.product.get("name", ""))
         self.brand_input.setText(self.product.get("brand", ""))
@@ -129,6 +199,13 @@ class ProductFormDialog(QDialog):
             idx = self.category_combo.findData(category_id)
             if idx >= 0:
                 self.category_combo.setCurrentIndex(idx)
+
+        try:
+            if self.product.get("has_image") and self.product.get("id"):
+                blob = self.api.get_product_image(int(self.product["id"]))
+                self._set_preview_from_bytes(blob)
+        except Exception:
+            pass
 
     def _on_save(self):
         name = self.name_input.text().strip()
@@ -152,10 +229,17 @@ class ProductFormDialog(QDialog):
                 category_id=category_id
             )
 
+            if self.selected_image_bytes:
+                payload["product_image"] = self.selected_image_bytes
+
+            saved = None
             if self.product:
-                self.api.update_product(self.product["id"], **payload)
+                saved = self.api.update_product(self.product["id"], **payload)
+                ProductCard.invalidate_thumb_cache(int(self.product["id"]))
             else:
-                self.api.create_product(**payload)
+                saved = self.api.create_product(**payload)
+                if isinstance(saved, dict) and saved.get("id") is not None:
+                    ProductCard.invalidate_thumb_cache(int(saved["id"]))
 
             self.accept()
 
@@ -253,7 +337,7 @@ class StockBatchesDialog(QDialog):
 
 
 # ===========================================
-# MAIN INVENTORY PAGE (CARD GRID)
+# MAIN INVENTORY PAGE (RESPONSIVE CARD GRID)
 # ===========================================
 class ProductListPage(QWidget):
     def __init__(self, user_data=None, parent=None):
@@ -266,19 +350,25 @@ class ProductListPage(QWidget):
         self.all_products: List[Dict[str, Any]] = []
         self.filtered_products: List[Dict[str, Any]] = []
 
+        # ✅ responsive layout tuning
+        self._card_max_w = 360   # should match ProductCard max width
+        self._hgap = 12          # grid horizontal spacing
+        self._current_cols: int = 0
+
+        # ✅ debounce reflow to prevent spam renders while resizing
+        self._reflow_timer = QTimer(self)
+        self._reflow_timer.setSingleShot(True)
+        self._reflow_timer.timeout.connect(self._reflow_now)
+
         self._build_ui()
         self._load_categories()
         self._load_all_products()
 
-    # ---------------------------------------
-    # UI BUILD
-    # ---------------------------------------
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(40, 24, 40, 24)
         root.setSpacing(18)
 
-        # Header row
         header = QHBoxLayout()
         title = QLabel("Inventory")
         title.setObjectName("title")
@@ -305,7 +395,6 @@ class ProductListPage(QWidget):
 
         root.addLayout(header)
 
-        # Filter bar (replaces old global header search)
         filter_card = QFrame()
         filter_card.setObjectName("Card")
         filter_layout = QHBoxLayout(filter_card)
@@ -328,12 +417,11 @@ class ProductListPage(QWidget):
 
         self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.setFixedHeight(30)
-        self.btn_refresh.clicked.connect(self._load_all_products)
+        self.btn_refresh.clicked.connect(self._hard_refresh_products)
         filter_layout.addWidget(self.btn_refresh)
 
         root.addWidget(filter_card)
 
-        # Grid card wrapper
         grid_card = QFrame()
         grid_card.setObjectName("Card")
         grid_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
@@ -345,25 +433,70 @@ class ProductListPage(QWidget):
         card_title.setObjectName("CardTitle")
         grid_card_layout.addWidget(card_title)
 
-        # Scroll area with grid
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
 
+        # ✅ listen for viewport resizes (important for responsive cols)
+        self.scroll.viewport().installEventFilter(self)
+
         self.grid_host = QWidget()
         self.grid = QGridLayout(self.grid_host)
         self.grid.setContentsMargins(4, 4, 4, 4)
-        self.grid.setHorizontalSpacing(12)
+        self.grid.setHorizontalSpacing(self._hgap)
         self.grid.setVerticalSpacing(12)
+        self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
         self.scroll.setWidget(self.grid_host)
         grid_card_layout.addWidget(self.scroll, 1)
 
         root.addWidget(grid_card, 1)
 
-    # ---------------------------------------
-    # DATA LOADING
-    # ---------------------------------------
+    # ✅ eventFilter catches scroll viewport resize events
+    def eventFilter(self, obj, event):
+        if obj is self.scroll.viewport() and event.type() == QEvent.Type.Resize:
+            self._schedule_reflow()
+        return super().eventFilter(obj, event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._schedule_reflow()
+
+    def _schedule_reflow(self):
+        # debounce
+        self._reflow_timer.start(90)
+
+    def _compute_cols(self) -> int:
+        if not hasattr(self, "scroll") or self.scroll is None:
+            return 3
+
+        # available width inside viewport
+        vw = int(self.scroll.viewport().width() or 0)
+        if vw <= 0:
+            return 3
+
+        # account for grid margins + a bit of safety padding
+        m = self.grid.contentsMargins()
+        avail = max(1, vw - (m.left() + m.right()) - 8)
+
+        gap = int(self.grid.horizontalSpacing() or self._hgap)
+        card_w = int(self._card_max_w)
+
+        # cols formula: how many cards fit in available width
+        cols = int((avail + gap) // (card_w + gap))
+        cols = max(1, cols)
+        cols = min(cols, 6)  # avoid crazy huge columns on ultrawide
+        return cols
+
+    def _reflow_now(self):
+        new_cols = self._compute_cols()
+        if new_cols != self._current_cols:
+            self._render_cards(cols=new_cols)
+
+    def _hard_refresh_products(self):
+        ProductCard.invalidate_thumb_cache()
+        self._load_all_products()
+
     def _load_categories(self):
         try:
             cats = self.api.get_categories()
@@ -374,28 +507,20 @@ class ProductListPage(QWidget):
                 for c in cats_list
                 if c and c.get("id") is not None
             }
-
         except Exception:
             self.category_map = {}
 
     def _load_all_products(self):
-        """
-        Since pagination UI is removed, we fetch a larger set.
-        We also attempt to walk pages if backend supports it.
-        """
         products: List[Dict[str, Any]] = []
-
         try:
             first = self.api.get_products(page=1, per_page=50)
             products.extend(first.get("products", []) or [])
             pages = int(first.get("pages", 1) or 1)
 
-            # Fetch remaining pages (bounded for safety)
             max_pages = min(pages, 20)
             for p in range(2, max_pages + 1):
                 res = self.api.get_products(page=p, per_page=50)
                 products.extend(res.get("products", []) or [])
-
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load products:\n{e}")
             products = []
@@ -403,16 +528,13 @@ class ProductListPage(QWidget):
         self.all_products = products
         self._apply_filter()
 
-    # ---------------------------------------
-    # FILTERING
-    # ---------------------------------------
     def _apply_filter(self):
         q = (self.filter_input.text() if hasattr(self, "filter_input") else "") or ""
         q = q.strip().lower()
 
         if not q:
             self.filtered_products = list(self.all_products)
-            self._render_cards()
+            self._render_cards(cols=self._compute_cols())
             return
 
         def cat_name_for(p: Dict[str, Any]) -> str:
@@ -431,11 +553,8 @@ class ProductListPage(QWidget):
                 filtered.append(p)
 
         self.filtered_products = filtered
-        self._render_cards()
+        self._render_cards(cols=self._compute_cols())
 
-    # ---------------------------------------
-    # CARD RENDERER
-    # ---------------------------------------
     def _clear_grid(self):
         while self.grid.count():
             item = self.grid.takeAt(0)
@@ -443,19 +562,18 @@ class ProductListPage(QWidget):
             if w:
                 w.setParent(None)
 
-    def _render_cards(self):
-        self._load_categories()  # keep category names fresh
+    def _render_cards(self, cols: int | None = None):
+        self._load_categories()
         self._clear_grid()
 
-        items = self.filtered_products
+        cols = int(cols or self._compute_cols())
+        self._current_cols = cols
 
-        # 3 cards per row
-        cols = 3
+        items = self.filtered_products
         row = 0
         col = 0
 
         for product in items:
-            cat_name = "—"
             if product.get("category"):
                 cat_name = str(product.get("category"))
             else:
@@ -476,12 +594,14 @@ class ProductListPage(QWidget):
                 col = 0
                 row += 1
 
-        # Add a stretch spacer row
-        self.grid.setRowStretch(row + 1, 1)
+        # ✅ make leftover width go to a spacer column (prevents single-card stretch)
+        total_rows = max(1, row + (1 if col > 0 else 0))
+        spacer = QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.grid.addItem(spacer, 0, cols, total_rows, 1)
+        self.grid.setColumnStretch(cols, 1)
 
-    # ---------------------------------------
-    # CRUD HANDLERS
-    # ---------------------------------------
+        self.grid.setRowStretch(total_rows + 1, 1)
+
     def _open_add_category_dialog(self):
         dlg = CategoryFormDialog(self.api, parent=self)
         if dlg.exec():
@@ -496,8 +616,12 @@ class ProductListPage(QWidget):
 
     def _open_edit_dialog(self, product: dict):
         self._load_categories()
+        pid = product.get("id")
+
         dlg = ProductFormDialog(self.api, self.category_map, product=product, parent=self)
         if dlg.exec():
+            if pid:
+                ProductCard.invalidate_thumb_cache(int(pid))
             self._load_all_products()
 
     def _confirm_delete(self, product: dict):
@@ -510,14 +634,16 @@ class ProductListPage(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                self.api.delete_product(product.get("id"))
+                pid = product.get("id")
+                self.api.delete_product(pid)
+
+                if pid:
+                    ProductCard.invalidate_thumb_cache(int(pid))
+
                 self._load_all_products()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to delete product:\n{e}")
 
-    # ---------------------------------------
-    # STOCK BATCH ENTRY POINT
-    # ---------------------------------------
     def _open_stock_batches(self, product: dict):
         dlg = StockBatchesDialog(self.api, product, parent=self)
         dlg.exec()

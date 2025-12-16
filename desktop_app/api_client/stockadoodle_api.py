@@ -1,9 +1,8 @@
-# desktop_app/api_client/stockadoodle_api.py
-
 from __future__ import annotations
 
+import time
 import requests
-from typing import Optional, Dict, List, Any, Union
+from typing import Optional, Dict, List, Any, Union, Tuple
 
 from desktop_app.utils.config import AppConfig
 
@@ -20,6 +19,7 @@ class StockaDoodleAPI:
 
     Notes:
     - _request() supports JSON by default.
+    - For multipart/form-data uploads, use _request_multipart().
     - For PDF or other binary responses, use raw=True or call download_pdf_report().
     """
 
@@ -40,6 +40,22 @@ class StockaDoodleAPI:
     def _url(self, endpoint: str) -> str:
         return f"{self.base_url}/{endpoint.lstrip('/')}"
 
+    def _raise_api_error(self, response: requests.Response) -> None:
+        try:
+            data = response.json()
+        except Exception:
+            data = None
+
+        if isinstance(data, dict):
+            errors = data.get("errors")
+            if isinstance(errors, list) and errors:
+                raise StockaDoodleAPIError(str(errors[0]))
+            message = data.get("message")
+            if message:
+                raise StockaDoodleAPIError(str(message))
+
+        raise StockaDoodleAPIError(f"HTTP {response.status_code}: {response.reason}")
+
     def _request(
         self,
         method: str,
@@ -48,21 +64,21 @@ class StockaDoodleAPI:
         **kwargs
     ) -> Union[Dict[str, Any], bytes]:
         """
-        Core request handler.
-
-        Args:
-            method: HTTP method
-            endpoint: API endpoint
-            raw: If True, returns bytes without JSON parsing.
-            **kwargs: forwarded to requests.Session.request()
-
-        Returns:
-            dict (JSON) by default, or bytes if raw=True or response is PDF.
+        Core request handler (JSON by default).
         """
         url = self._url(endpoint)
 
         if "timeout" not in kwargs:
             kwargs["timeout"] = self.timeout
+
+        # Safety: if using json=..., ensure headers for JSON
+        if "json" in kwargs and kwargs.get("json") is not None:
+            headers = dict(kwargs.get("headers") or {})
+            if not any(k.lower() == "content-type" for k in headers.keys()):
+                headers["Content-Type"] = "application/json"
+            if not any(k.lower() == "accept" for k in headers.keys()):
+                headers["Accept"] = "application/json"
+            kwargs["headers"] = headers
 
         try:
             response = self.session.request(method, url, **kwargs)
@@ -71,22 +87,7 @@ class StockaDoodleAPI:
             is_pdf = "application/pdf" in content_type
 
             if not response.ok:
-                try:
-                    data = response.json()
-                except Exception:
-                    data = None
-
-                if isinstance(data, dict):
-                    errors = data.get("errors")
-                    if isinstance(errors, list) and errors:
-                        raise StockaDoodleAPIError(str(errors[0]))
-                    message = data.get("message")
-                    if message:
-                        raise StockaDoodleAPIError(str(message))
-
-                raise StockaDoodleAPIError(
-                    f"HTTP {response.status_code}: {response.reason}"
-                )
+                self._raise_api_error(response)
 
             if raw or is_pdf:
                 return response.content
@@ -97,6 +98,61 @@ class StockaDoodleAPI:
                 data = None
 
             return data or {}
+
+        except requests.exceptions.RequestException as e:
+            raise StockaDoodleAPIError(f"Connection error: {str(e)}")
+
+    def _request_multipart(
+        self,
+        method: str,
+        endpoint: str,
+        data: Dict[str, Any],
+        file_bytes: Optional[bytes] = None,
+        filename: str = "upload.jpg",
+        file_content_type: str = "application/octet-stream",
+        file_field_names: Tuple[str, ...] = ("image", "product_image"),
+    ) -> Dict[str, Any]:
+        """
+        Multipart/form-data request helper.
+        Sends the same file under multiple field names for backend compatibility.
+        """
+        url = self._url(endpoint)
+
+        headers = {"Accept": "application/json"}  # don't set Content-Type manually for multipart
+        files = None
+
+        if file_bytes:
+            # Send in BOTH keys to match whatever get_image_binary() expects
+            files = []
+            for field in file_field_names:
+                files.append((field, (filename, file_bytes, file_content_type)))
+
+        # Convert None -> remove, and cast non-str primitives safely
+        clean_data: Dict[str, Any] = {}
+        for k, v in (data or {}).items():
+            if v is None:
+                continue
+            # Flask request.form only carries strings, so we stringify here
+            clean_data[k] = str(v)
+
+        try:
+            resp = self.session.request(
+                method,
+                url,
+                data=clean_data,
+                files=files,
+                headers=headers,
+                timeout=self.timeout
+            )
+            if not resp.ok:
+                self._raise_api_error(resp)
+
+            try:
+                payload = resp.json()
+            except Exception:
+                payload = None
+
+            return payload or {}
 
         except requests.exceptions.RequestException as e:
             raise StockaDoodleAPIError(f"Connection error: {str(e)}")
@@ -159,9 +215,7 @@ class StockaDoodleAPI:
             "email": email,
             "role": role,
         }
-        if user_image:
-            data["image_data"] = user_image
-
+        # keeping existing behavior for users; if you want multipart for users too, tell me
         result = self._request("POST", "/users", json=data)
         return result  # type: ignore[return-value]
 
@@ -199,12 +253,10 @@ class StockaDoodleAPI:
         description: Optional[str] = None,
         category_image: Optional[bytes] = None
     ) -> Dict[str, Any]:
+        # keeping your existing JSON behavior for categories;
+        # if you want category image upload the same way as product, I can mirror it.
         data: Dict[str, Any] = {"name": name, "description": description}
         data = {k: v for k, v in data.items() if v is not None}
-
-        if category_image:
-            data["image_data"] = category_image
-
         result = self._request("POST", "/categories", json=data)
         return result  # type: ignore[return-value]
 
@@ -217,7 +269,7 @@ class StockaDoodleAPI:
         return result  # type: ignore[return-value]
 
     # ================================================================
-    # PRODUCT MANAGEMENT
+    # PRODUCT MANAGEMENT (✅ multipart when image provided)
     # ================================================================
     def get_products(
         self,
@@ -261,9 +313,9 @@ class StockaDoodleAPI:
         expiration_date: Optional[str] = None,
         added_by: Optional[int] = None
     ) -> Dict[str, Any]:
-        data: Dict[str, Any] = {
+        payload: Dict[str, Any] = {
             "name": name,
-            "price": price,
+            "price": int(price),
             "brand": brand,
             "category_id": category_id,
             "min_stock_level": min_stock_level,
@@ -272,18 +324,45 @@ class StockaDoodleAPI:
             "expiration_date": expiration_date,
             "added_by": added_by or (self.current_user["id"] if self.current_user else None),
         }
+        payload = {k: v for k, v in payload.items() if v is not None}
 
-        data = {k: v for k, v in data.items() if v is not None}
-
+        # ✅ if image exists -> multipart
         if product_image:
-            data["image_data"] = product_image
+            return self._request_multipart(
+                "POST",
+                "/products",
+                data=payload,
+                file_bytes=product_image,
+                filename="product.jpg",
+                file_field_names=("image", "product_image")
+            )
 
-        result = self._request("POST", "/products", json=data)
+        # otherwise JSON
+        result = self._request("POST", "/products", json=payload)
         return result  # type: ignore[return-value]
 
     def update_product(self, product_id: int, **kwargs) -> Dict[str, Any]:
+        """
+        PATCH product.
+        If kwargs includes product_image (bytes), send multipart/form-data.
+        """
         if self.current_user and "added_by" not in kwargs:
             kwargs["added_by"] = self.current_user["id"]
+
+        # pull image bytes out if provided
+        product_image = kwargs.pop("product_image", None)
+
+        # ✅ multipart replace-only: only replaces if you provide new bytes
+        if product_image:
+            return self._request_multipart(
+                "PATCH",
+                f"/products/{product_id}",
+                data=kwargs,
+                file_bytes=product_image,
+                filename="product.jpg",
+                file_field_names=("image", "product_image")
+            )
+
         result = self._request("PATCH", f"/products/{product_id}", json=kwargs)
         return result  # type: ignore[return-value]
 
@@ -323,7 +402,6 @@ class StockaDoodleAPI:
         reason: str,
         user_id: Optional[int] = None
     ) -> Dict[str, Any]:
-        # Server expects product_id + user_id + quantity + notes
         data = {
             "product_id": product_id,
             "quantity": quantity,
@@ -344,7 +422,7 @@ class StockaDoodleAPI:
         return result  # type: ignore[return-value]
 
     # ================================================================
-    # SALES MANAGEMENT
+    # SALES / LOGS / REPORTS / NOTIFS / HEALTH (unchanged)
     # ================================================================
     def record_sale(self, retailer_id: int, items: List[Dict[str, Any]], total_amount: float) -> Dict[str, Any]:
         data = {"retailer_id": retailer_id, "items": items, "total_amount": total_amount}
@@ -364,7 +442,6 @@ class StockaDoodleAPI:
             params["end_date"] = end_date
         if retailer_id is not None:
             params["retailer_id"] = retailer_id
-
         result = self._request("GET", "/sales/reports", params=params)
         return result  # type: ignore[return-value]
 
@@ -378,15 +455,11 @@ class StockaDoodleAPI:
         result = self._request("DELETE", f"/sales/{sale_id}", json=data)
         return result  # type: ignore[return-value]
 
-    # ✅ NEW: Return ONE sold item row inside a Sale (sale_id + item_index)
     def return_sale_item(self, sale_id: int, item_index: int, user_id: Optional[int] = None) -> Dict[str, Any]:
         data = {"user_id": user_id or (self.current_user["id"] if self.current_user else None)}
         result = self._request("DELETE", f"/sales/{sale_id}/items/{item_index}", json=data)
         return result  # type: ignore[return-value]
 
-    # ================================================================
-    # LOGS & AUDIT
-    # ================================================================
     def get_product_logs(self, product_id: int, limit: int = 50) -> Dict[str, Any]:
         result = self._request("GET", f"/log/product/{product_id}", params={"limit": limit})
         return result  # type: ignore[return-value]
@@ -416,27 +489,18 @@ class StockaDoodleAPI:
         result = self._request("GET", "/log/api", params=params)
         return result  # type: ignore[return-value]
 
-    # ================================================================
-    # DASHBOARD (new)
-    # ================================================================
     def get_admin_dashboard(self) -> Dict[str, Any]:
-        """Admin dashboard metrics."""
         result = self._request("GET", "/dashboard/admin")
         return result  # type: ignore[return-value]
 
     def get_manager_dashboard(self) -> Dict[str, Any]:
-        """Manager dashboard metrics."""
         result = self._request("GET", "/dashboard/manager")
         return result  # type: ignore[return-value]
 
     def get_retailer_dashboard(self, user_id: int) -> Dict[str, Any]:
-        """Retailer dashboard metrics for a specific user."""
         result = self._request("GET", f"/dashboard/retailer/{user_id}")
         return result  # type: ignore[return-value]
 
-    # ================================================================
-    # METRICS
-    # ================================================================
     def get_retailer_metrics(self, user_id: int) -> Dict[str, Any]:
         result = self._request("GET", f"/retailer/{user_id}")
         return result  # type: ignore[return-value]
@@ -462,9 +526,6 @@ class StockaDoodleAPI:
         result = self._request("PATCH", f"/metrics/retailer/{user_id}/quota", json=data)
         return result  # type: ignore[return-value]
 
-    # ================================================================
-    # REPORTS (JSON endpoints)
-    # ================================================================
     def get_sales_performance_report(
         self,
         start_date: Optional[str] = None,
@@ -520,9 +581,6 @@ class StockaDoodleAPI:
         result = self._request("GET", "/reports/user-accounts")
         return result  # type: ignore[return-value]
 
-    # ================================================================
-    # REPORTS (PDF download)
-    # ================================================================
     def download_pdf_report(self, report_type: str, **params) -> bytes:
         result = self._request(
             "GET",
@@ -534,15 +592,8 @@ class StockaDoodleAPI:
             return bytes(result)
         raise StockaDoodleAPIError("PDF download failed: response was not bytes.")
 
-    # ================================================================
-    # NOTIFICATIONS
-    # ================================================================
     def send_low_stock_alerts(self, triggered_by: Optional[int] = None) -> Dict[str, Any]:
-        result = self._request(
-            "POST",
-            "/notifications/low-stock",
-            json={"triggered_by": triggered_by},
-        )
+        result = self._request("POST", "/notifications/low-stock", json={"triggered_by": triggered_by})
         return result  # type: ignore[return-value]
 
     def send_expiration_alerts(
@@ -555,11 +606,7 @@ class StockaDoodleAPI:
         return result  # type: ignore[return-value]
 
     def send_daily_summary(self, triggered_by: Optional[int] = None) -> Dict[str, Any]:
-        result = self._request(
-            "POST",
-            "/notifications/daily-summary",
-            json={"triggered_by": triggered_by},
-        )
+        result = self._request("POST", "/notifications/daily-summary", json={"triggered_by": triggered_by})
         return result  # type: ignore[return-value]
 
     def get_notification_history(
@@ -573,9 +620,34 @@ class StockaDoodleAPI:
         result = self._request("GET", "/notifications/history", params=params)
         return result  # type: ignore[return-value]
 
-    # ================================================================
-    # HEALTH CHECK
-    # ================================================================
     def health_check(self) -> Dict[str, Any]:
         result = self._request("GET", "/health")
         return result  # type: ignore[return-value]
+
+    # ================================================================
+    # IMAGE DOWNLOAD HELPERS (bytes)
+    # ================================================================
+    def get_product_image(self, product_id: int) -> bytes:
+        # ✅ cache-bust to avoid old bytes due to server/proxy Cache-Control headers
+        params = {"v": str(int(time.time() * 1000))}
+        headers = {
+            "Accept": "image/*",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        }
+        result = self._request("GET", f"/products/{product_id}/image", raw=True, headers=headers, params=params)
+        if isinstance(result, (bytes, bytearray)):
+            return bytes(result)
+        raise StockaDoodleAPIError("Product image download failed: response was not bytes.")
+
+    def get_category_image(self, category_id: int) -> bytes:
+        params = {"v": str(int(time.time() * 1000))}
+        headers = {
+            "Accept": "image/*",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        }
+        result = self._request("GET", f"/categories/{category_id}/image", raw=True, headers=headers, params=params)
+        if isinstance(result, (bytes, bytearray)):
+            return bytes(result)
+        raise StockaDoodleAPIError("Category image download failed: response was not bytes.")

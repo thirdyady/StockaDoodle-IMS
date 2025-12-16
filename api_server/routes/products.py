@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from flask import Blueprint, request, jsonify
+import io
+import imghdr
+from datetime import datetime, timezone
+
+from flask import Blueprint, request, jsonify, send_file
 from mongoengine import Q
 from mongoengine.errors import DoesNotExist
 
@@ -13,7 +17,6 @@ from core.inventory_manager import InventoryManager, InventoryError
 from core.activity_logger import ActivityLogger
 
 from utils import get_image_binary, extract_int, parse_date
-from datetime import datetime, timezone
 
 bp = Blueprint('products', __name__)
 
@@ -34,6 +37,23 @@ def _get_actor_user(actor_id: int):
 
 def _err(msg: str, code: int = 400):
     return jsonify({"errors": [msg]}), code
+
+
+def _detect_image_mimetype(blob: bytes) -> tuple[str, str]:
+    """
+    Returns (mimetype, ext) best-effort.
+    """
+    kind = imghdr.what(None, h=blob)  # 'png', 'jpeg', etc.
+    if kind in ("jpeg", "jpg"):
+        return "image/jpeg", "jpg"
+    if kind == "png":
+        return "image/png", "png"
+    if kind == "gif":
+        return "image/gif", "gif"
+    if kind == "webp":
+        return "image/webp", "webp"
+    # fallback
+    return "application/octet-stream", "bin"
 
 
 # ----------------------------------------------------------------------
@@ -115,6 +135,32 @@ def get_product(id):
 
 
 # ----------------------------------------------------------------------
+# ✅ NEW: GET /api/v1/products/<id>/image → fetch product image bytes
+# ----------------------------------------------------------------------
+@bp.route('/<int:id>/image', methods=['GET'])
+def get_product_image(id: int):
+    product = Product.objects(id=id).first()
+    if not product:
+        return _err("Product not found", 404)
+
+    blob = product.product_image
+    if not blob:
+        return _err("No product image", 404)
+
+    mimetype, ext = _detect_image_mimetype(blob)
+
+    resp = send_file(
+        io.BytesIO(blob),
+        mimetype=mimetype,
+        as_attachment=False,
+        download_name=f"product_{id}.{ext}"
+    )
+    # light caching
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+# ----------------------------------------------------------------------
 # GET /api/v1/products/<product_id>/stock_batches → list all batches
 # ----------------------------------------------------------------------
 @bp.route('/<int:product_id>/stock_batches', methods=['GET'])
@@ -150,9 +196,6 @@ def create_product():
     if price is None:
         return _err("Price must be a number", 400)
 
-    # Category handling:
-    # If your Product model still requires category_id,
-    # this route will enforce it cleanly here.
     category_id = None
     if 'category_id' in data and data.get('category_id') not in (None, "", "null"):
         category_id = extract_int(data.get('category_id'))
@@ -161,11 +204,7 @@ def create_product():
         if not Category.objects(id=category_id).first():
             return _err("Invalid category ID", 400)
 
-    # If category_id is still required in your Product model,
-    # enforce here to avoid 500
     if category_id is None:
-        # Only enforce if categories exist in the system:
-        # This keeps your UI flexible in early dev/testing.
         has_any_category = Category.objects().first() is not None
         product_category_required = True  # change to False if you want fully optional
         if has_any_category and product_category_required:
@@ -311,7 +350,6 @@ def replace_product(product_id):
     product.min_stock_level = extract_int(data.get('min_stock_level'), product.min_stock_level)
     product.details = data.get('details', product.details)
 
-    # Replace ALL existing batches
     StockBatch.objects(product_id=product.id).delete()
 
     new_stock = extract_int(data.get('stock_level'))
@@ -396,7 +434,6 @@ def patch_product(product_id):
     actor_id = _get_actor_id(data)
     actor_user = _get_actor_user(actor_id)
 
-    # Optional: add a new batch via PATCH
     if 'stock_level' in data:
         qty = extract_int(data.get('stock_level'))
         if qty is not None:
@@ -517,7 +554,6 @@ def update_stock_batch_metadata(product_id, batch_id):
     actor_user = _get_actor_user(actor_id)
 
     if "added_by" in data:
-        # allow overwrite of metadata owner
         user_id = extract_int(data.get('added_by'))
         if user_id:
             batch.added_by = User.objects(id=user_id).first()
@@ -560,7 +596,6 @@ def delete_product(id):
 
     name = product.name
 
-    # Delete child batches first (cleanliness)
     StockBatch.objects(product_id=product.id).delete()
     product.delete()
 
@@ -595,7 +630,6 @@ def delete_stock_batch(product_id, batch_id):
     if not batch:
         return _err("Stock batch not found", 404)
 
-    # Safety rule: allow delete only if empty
     if (batch.quantity or 0) > 0:
         return _err("Cannot delete a batch with remaining stock. Dispose stock first.", 400)
 
