@@ -178,6 +178,7 @@ class PDFReportGenerator:
         end_date = (report_data.get('date_range') or {}).get('end')
         date_range = f"{start_date} to {end_date}" if start_date and end_date else "Not specified"
 
+        # ✅ FIX: Correct title for Report 1
         self._add_report_title(elements, "Sales Performance Report", f"Report Period: {date_range}")
 
         elements.append(Paragraph("Summary", self.styles['section']))

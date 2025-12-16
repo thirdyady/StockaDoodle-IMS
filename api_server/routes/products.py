@@ -5,6 +5,7 @@ import imghdr
 from datetime import datetime, timezone
 
 from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify
 from mongoengine import Q
 from mongoengine.errors import DoesNotExist
 
@@ -196,6 +197,9 @@ def create_product():
     if price is None:
         return _err("Price must be a number", 400)
 
+    # Category handling:
+    # If your Product model still requires category_id,
+    # this route will enforce it cleanly here.
     category_id = None
     if 'category_id' in data and data.get('category_id') not in (None, "", "null"):
         category_id = extract_int(data.get('category_id'))
@@ -205,6 +209,11 @@ def create_product():
             return _err("Invalid category ID", 400)
 
     if category_id is None:
+    # If category_id is still required in your Product model,
+    # enforce here to avoid 500
+    if category_id is None:
+        # Only enforce if categories exist in the system:
+        # This keeps your UI flexible in early dev/testing.
         has_any_category = Category.objects().first() is not None
         product_category_required = True  # change to False if you want fully optional
         if has_any_category and product_category_required:
@@ -350,6 +359,7 @@ def replace_product(product_id):
     product.min_stock_level = extract_int(data.get('min_stock_level'), product.min_stock_level)
     product.details = data.get('details', product.details)
 
+    # Replace ALL existing batches
     StockBatch.objects(product_id=product.id).delete()
 
     new_stock = extract_int(data.get('stock_level'))
@@ -434,6 +444,7 @@ def patch_product(product_id):
     actor_id = _get_actor_id(data)
     actor_user = _get_actor_user(actor_id)
 
+    # Optional: add a new batch via PATCH
     if 'stock_level' in data:
         qty = extract_int(data.get('stock_level'))
         if qty is not None:
@@ -554,6 +565,7 @@ def update_stock_batch_metadata(product_id, batch_id):
     actor_user = _get_actor_user(actor_id)
 
     if "added_by" in data:
+        # allow overwrite of metadata owner
         user_id = extract_int(data.get('added_by'))
         if user_id:
             batch.added_by = User.objects(id=user_id).first()

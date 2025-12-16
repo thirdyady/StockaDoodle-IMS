@@ -985,34 +985,34 @@ class DashboardPage(QWidget):
     # Admin Dashboard
     # ------------------------
     def _refresh_admin(self):
-        """
-        ✅ FIXED: use backend route GET /api/v1/dashboard/admin
-        so Total Revenue + Total Sales Count always display correctly.
-        """
         self.card_1.title_lbl.setText("Total Revenue")
         self.card_2.title_lbl.setText("Total Sales Count")
         self.card_3.title_lbl.setText("Total Products")
         self.card_4.title_lbl.setText("Total Users")
 
+        products_data = self.api.get_products(per_page=9999)
+        prods = products_data.get("products", []) or []
+        self.card_3.set_value(str(len(prods)))
+
+        users_data = self.api.get_users()
+        users_list = users_data if isinstance(users_data, list) else (users_data.get("users", []) or [])
+        self.card_4.set_value(str(len(users_list)))
+
+        total_sales_count = 0
+        total_revenue = 0.0
         try:
-            res = self.api.get_admin_dashboard()  # GET /dashboard/admin
-
-            total_users = int(_safe_float(res.get("total_users")))
-            total_products = int(_safe_float(res.get("total_products")))
-            total_sales_count = int(_safe_float(res.get("total_sales_count")))
-            total_revenue = float(_safe_float(res.get("total_revenue")))
-
-            self.card_4.set_value(str(total_users))
-            self.card_3.set_value(str(total_products))
-            self.card_2.set_value(str(total_sales_count))
-            self.card_1.set_value(f"₱{total_revenue:,.2f}")
-
+            end_d = date.today()
+            start_d = end_d - timedelta(days=3650)
+            sales_data = self.api.get_sales(start_date=start_d.isoformat(), end_date=end_d.isoformat())
+            sales_list = sales_data.get("sales", []) or []
+            total_sales_count = len(sales_list)
+            for s in sales_list:
+                total_revenue += _safe_float(s.get("total_amount"))
         except Exception:
-            traceback.print_exc()
-            self.card_1.set_value("₱0.00")
-            self.card_2.set_value("0")
-            self.card_3.set_value("0")
-            self.card_4.set_value("0")
+            pass
+
+        self.card_2.set_value(str(total_sales_count))
+        self.card_1.set_value(f"₱{int(total_revenue):,}")
 
         if self.activity_preview:
             self.activity_preview.refresh()

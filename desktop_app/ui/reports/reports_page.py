@@ -8,7 +8,7 @@ from typing import Dict, Any, Tuple, Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QTextEdit, QFrame, QSizePolicy, QMessageBox,
-    QFileDialog, QDateEdit, QSpinBox, QCalendarWidget
+    QFileDialog, QDateEdit, QSpinBox
 )
 from PyQt6.QtCore import Qt, QDate
 
@@ -128,7 +128,6 @@ class ReportsPage(QWidget):
         self.day_date.setCalendarPopup(True)
         self.day_date.setDisplayFormat("dd/MM/yy")  # friendly UI
         self.day_date.setFixedWidth(110)
-        self._apply_calendar_popup_style(self.day_date)  # ✅ FIX: calendar popup theme
         fl.addWidget(self.day_date)
 
         # ---- Range pickers (shown only for "Custom range…")
@@ -140,7 +139,6 @@ class ReportsPage(QWidget):
         self.start_date.setCalendarPopup(True)
         self.start_date.setDisplayFormat("dd/MM/yy")  # friendly UI
         self.start_date.setFixedWidth(110)
-        self._apply_calendar_popup_style(self.start_date)  # ✅ FIX
         fl.addWidget(self.start_date)
 
         self.end_label = QLabel("End:")
@@ -151,7 +149,6 @@ class ReportsPage(QWidget):
         self.end_date.setCalendarPopup(True)
         self.end_date.setDisplayFormat("dd/MM/yy")  # friendly UI
         self.end_date.setFixedWidth(110)
-        self._apply_calendar_popup_style(self.end_date)  # ✅ FIX
         fl.addWidget(self.end_date)
 
         # ---- Days ahead (alerts report)
@@ -214,69 +211,6 @@ class ReportsPage(QWidget):
                 "No report specs were found.\n"
                 "Check DesktopReportGenerator.list_reports() and REPORT_SPECS."
             )
-
-    # ✅ NEW: local calendar popup style override (fixes “black calendar”)
-    def _apply_calendar_popup_style(self, date_edit: QDateEdit) -> None:
-        try:
-            cal = date_edit.calendarWidget()
-            if not cal:
-                return
-
-            # Optional: make it look cleaner/consistent
-            cal.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
-
-            # Force a "normal/light" calendar regardless of any global stylesheet.
-            cal.setStyleSheet("""
-                QCalendarWidget QWidget {
-                    background: #FFFFFF;
-                    color: #0F172A;
-                }
-
-                QCalendarWidget QAbstractItemView {
-                    background: #FFFFFF;
-                    color: #0F172A;
-                    selection-background-color: #2563EB;
-                    selection-color: #FFFFFF;
-                    outline: 0;
-                }
-
-                QCalendarWidget QHeaderView::section {
-                    background: #F1F5F9;
-                    color: #0F172A;
-                    padding: 4px;
-                    border: 0px;
-                    font-weight: 700;
-                }
-
-                QCalendarWidget QToolButton {
-                    color: #0F172A;
-                    background: transparent;
-                    border: 0px;
-                    border-radius: 6px;
-                    padding: 4px 8px;
-                    font-weight: 700;
-                }
-                QCalendarWidget QToolButton:hover {
-                    background: #EEF3FF;
-                }
-
-                QCalendarWidget QMenu {
-                    background: #FFFFFF;
-                    color: #0F172A;
-                    border: 1px solid #D3D8E5;
-                }
-
-                QCalendarWidget QSpinBox {
-                    background: #FFFFFF;
-                    color: #0F172A;
-                    border: 1px solid #D3D8E5;
-                    border-radius: 6px;
-                    padding: 2px 6px;
-                }
-            """)
-        except Exception:
-            # If anything goes wrong, we silently ignore to avoid breaking core UI.
-            return
 
     def _populate_report_types(self):
         self.report_type.clear()
@@ -372,32 +306,39 @@ class ReportsPage(QWidget):
 
         self._set_filters_visible(needs_date, needs_days)
 
+        # Update date controls visibility based on period selection
         if needs_date:
             self.on_period_changed(self.period.currentText())
 
     def _set_filters_visible(self, show_date_range: bool, show_days_ahead: bool):
         self.filters_card.setVisible(show_date_range or show_days_ahead)
 
+        # Date-related widgets (period + pickers)
         self.period_label.setVisible(show_date_range)
         self.period.setVisible(show_date_range)
 
+        # specific day widgets
         self.day_label.setVisible(False)
         self.day_date.setVisible(False)
 
+        # range widgets
         self.start_label.setVisible(False)
         self.start_date.setVisible(False)
         self.end_label.setVisible(False)
         self.end_date.setVisible(False)
 
+        # Days ahead widgets
         self.days_ahead_label.setVisible(show_days_ahead)
         self.days_ahead.setVisible(show_days_ahead)
 
     def on_period_changed(self, period: str):
+        # Only applies to date-range reports
         if not self.current_spec or not getattr(self.current_spec, "needs_date_range", False):
             return
 
         today = date.today()
 
+        # Hide all date pickers first
         self.day_label.setVisible(False)
         self.day_date.setVisible(False)
         self.start_label.setVisible(False)
@@ -425,17 +366,26 @@ class ReportsPage(QWidget):
             self._set_qdate(self.end_date, today)
 
         elif period == self.PERIOD_SPECIFIC_DAY:
+            # Show single date picker (start=end)
             self.day_label.setVisible(True)
             self.day_date.setVisible(True)
+
+            # default: today
             self._set_qdate(self.day_date, today)
 
         elif period == self.PERIOD_CUSTOM_RANGE:
+            # Show start/end pickers (same-day allowed)
             self.start_label.setVisible(True)
             self.start_date.setVisible(True)
             self.end_label.setVisible(True)
             self.end_date.setVisible(True)
+
+            # default: last 30 days
             self._set_qdate(self.start_date, today - timedelta(days=30))
             self._set_qdate(self.end_date, today)
+
+        # For non-custom presets that use ranges, show nothing (clean UI)
+        # But when generating, we still compute correct params.
 
     def _collect_params_for_spec(self, spec: ReportSpec) -> Dict[str, Any]:
         params: Dict[str, Any] = {}
@@ -471,6 +421,7 @@ class ReportsPage(QWidget):
             else:
                 start, end = today - timedelta(days=30), today
 
+            # Allow same day checks ✅ (start == end is OK)
             if start > end:
                 raise ValueError("Start date cannot be after end date.")
 
@@ -486,11 +437,13 @@ class ReportsPage(QWidget):
     # KPI refresh
     # ---------------------------------------------------------
     def refresh_kpis_safely(self):
+        # Defaults
         self.kpi_value_labels.get("revenue_30d", QLabel()).setText("₱0.00")
         self.kpi_value_labels.get("avg_order_30d", QLabel()).setText("₱0.00")
         self.kpi_value_labels.get("top_category", QLabel()).setText("N/A")
         self.kpi_value_labels.get("alerts_7d", QLabel()).setText("0")
 
+        # Revenue + Avg Order (last 30 days)
         try:
             today = date.today()
             start = (today - timedelta(days=30)).isoformat()
@@ -514,6 +467,7 @@ class ReportsPage(QWidget):
         except Exception:
             pass
 
+        # Top Category
         try:
             cd = DesktopReportGenerator.generate_report("category_distribution")
             categories = self._safe_get(cd, "categories", []) or []
@@ -532,6 +486,7 @@ class ReportsPage(QWidget):
         except Exception:
             pass
 
+        # Alerts count (7d)
         try:
             ar = DesktopReportGenerator.generate_report("alerts", days_ahead=7)
             summary = self._safe_get(ar, "summary", {}) or {}

@@ -31,68 +31,36 @@ def show_crash_dialog(exc_type, exc_value, exc_traceback):
 # Catch exceptions anywhere in the Qt loop
 sys.excepthook = show_crash_dialog
 
+# IMPORTANT — holds main window so app doesn't close
+_app_main_window_ref = None
 
-class AppController:
-    """
-    Controls window switching:
-    LoginWindow -> MainWindow -> Logout -> LoginWindow
-    """
 
-    def __init__(self):
-        self.login_window: LoginWindow | None = None
-        self.main_window: MainWindow | None = None
+def on_login_successful(user_data: dict):
+    global _app_main_window_ref
 
-    def show_login(self):
-        # close main if exists
-        if self.main_window is not None:
-            try:
-                self.main_window.close()
-            except Exception:
-                pass
-            self.main_window = None
+    print(">>> LOGIN SUCCESSFUL:", user_data)
+    set_current_user(user_data)
 
-        self.login_window = LoginWindow()
-        self.login_window.login_successful.connect(self.on_login_successful)
-        self.login_window.show()
+    try:
+        main_window = MainWindow(user_data)
 
-    def on_login_successful(self, user_data: dict):
-        print(">>> LOGIN SUCCESSFUL:", user_data)
-        set_current_user(user_data)
+        # STORE IT HERE
+        _app_main_window_ref = main_window
 
-        # close login
-        if self.login_window is not None:
-            try:
-                self.login_window.close()
-            except Exception:
-                pass
-            self.login_window = None
+        main_window.show()
 
-        # open main
-        self.main_window = MainWindow(user_data)
+    except Exception as e:
+        print("❌ ERROR WHILE OPENING MAIN WINDOW:", str(e))
+        raise e
 
-        # ✅ when main emits logout, go back to login
-        self.main_window.logout_requested.connect(self.on_logout_requested)
-
-        self.main_window.show()
-
-    def on_logout_requested(self):
-        # Clear global user if you want
-        try:
-            set_current_user({})
-        except Exception:
-            pass
-
-        # Show login again
-        self.show_login()
-
+from desktop_app.utils.app_state import set_current_user
+from desktop_app.utils.style_presets import get_global_stylesheet
 
 def main():
     app = QApplication(sys.argv)
 
-    # ✅ IMPORTANT: don't quit when switching windows
-    app.setQuitOnLastWindowClosed(False)
-
     # ✅ Apply ONE global stylesheet once
+    # Login/MFA can still apply dialog-specific styles locally if needed
     try:
         app.setStyleSheet(get_global_stylesheet())
     except Exception as e:
@@ -107,8 +75,9 @@ def main():
     else:
         print("[WARNING] App icon missing at:", icon_path)
 
-    controller = AppController()
-    controller.show_login()
+    login_window = LoginWindow()
+    login_window.login_successful.connect(on_login_successful)
+    login_window.show()
 
     sys.exit(app.exec())
 

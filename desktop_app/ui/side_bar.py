@@ -9,47 +9,11 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QFrame, QHBoxLayout, QToolButton, QSizePolicy, QMenu
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QStandardPaths
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QPainterPath, QImageReader
+from PyQt6.QtCore import Qt, QSize, pyqtSignal
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QPainterPath
 
 from desktop_app.utils.helpers import get_feather_icon
 from desktop_app.utils.icons import get_icon
-
-
-# ---------------------------------------------------------
-# Profile photo cache helpers (matches ProfilePage behavior)
-# ---------------------------------------------------------
-def _app_cache_dir() -> str:
-    base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
-    if not base:
-        base = os.path.expanduser("~/.stockadoodle")
-    os.makedirs(base, exist_ok=True)
-    return base
-
-
-def _local_profile_photo_path(user_id: Optional[int]) -> str:
-    uid = int(user_id) if user_id is not None else 0
-    return os.path.join(_app_cache_dir(), f"profile_{uid}.png")
-
-
-def _load_pixmap_fresh(path: str) -> QPixmap:
-    """
-    Load image using QImageReader to avoid any stale image behavior
-    and to support auto-transform.
-    """
-    try:
-        if not path or not os.path.exists(path):
-            return QPixmap()
-
-        reader = QImageReader(path)
-        reader.setAutoTransform(True)
-        img = reader.read()
-        if img.isNull():
-            return QPixmap()
-
-        return QPixmap.fromImage(img)
-    except Exception:
-        return QPixmap()
 
 
 class _SidebarItemWidget(QWidget):
@@ -97,9 +61,6 @@ class _SidebarItemWidget(QWidget):
         self.text_lbl.setObjectName("sidebarItemText")
         self.text_lbl.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
 
-        # ✅ init dynamic property so QSS can target reliably
-        self.text_lbl.setProperty("selected", False)
-
         row.addWidget(self.icon_lbl)
         row.addWidget(self.text_lbl, 1)
 
@@ -111,22 +72,12 @@ class _SidebarItemWidget(QWidget):
 
     def set_selected(self, selected: bool):
         self._selected = bool(selected)
-
-        # ✅ Set selected on BOTH container + label (fixes Dashboard stuck-white issue)
         self.setProperty("selected", self._selected)
-        self.text_lbl.setProperty("selected", self._selected)
-
         self._refresh_icon()
 
-        # ✅ Force stylesheet re-eval on widget + label
-        for w in (self, self.text_lbl, self.icon_lbl):
-            try:
-                w.style().unpolish(w)
-                w.style().polish(w)
-                w.update()
-            except Exception:
-                pass
-
+        # Force stylesheet re-eval for this widget
+        self.style().unpolish(self)
+        self.style().polish(self)
         self.update()
 
     def _to_pixmap(self, icon: QIcon, size: int) -> QPixmap:
@@ -195,7 +146,7 @@ class SideBar(QWidget):
         self._footer_name = None
         self._footer_role = None
         self._btn_footer_menu = None
-        self._footer_avatar = None
+        self._footer_avatar = None  # store avatar label so we can refresh it later
         self._footer_text_wrap = None
 
         self._build_ui()
@@ -205,7 +156,7 @@ class SideBar(QWidget):
         self._sync_selected_state()
 
     # ---------------------------------------------------------
-    # Public API
+    # Public API: call this when user info changes (profile photo, name, role)
     # ---------------------------------------------------------
     def update_user(self, user: dict):
         self.user = user or {}
@@ -223,26 +174,22 @@ class SideBar(QWidget):
     # Footer avatar helpers
     # ---------------------------------------------------------
     def _get_profile_image_path(self) -> str:
-        p = str(
+        """
+        Accept multiple keys (ProfilePage can store it under any of these).
+        """
+        return str(
             self.user.get("profile_image_path")
             or self.user.get("profile_photo_path")
             or self.user.get("avatar_path")
             or self.user.get("profile_picture")
             or self.user.get("photo")
             or ""
-        ).strip()
-
-        if p and os.path.exists(p):
-            return p
-
-        uid = self.user.get("id")
-        cached = _local_profile_photo_path(uid)
-        if cached and os.path.exists(cached):
-            return cached
-
-        return ""
+        )
 
     def _rounded_pixmap(self, pm: QPixmap, size: int, radius: int) -> QPixmap:
+        """
+        Create a rounded-corner pixmap (so avatar corners aren't square).
+        """
         if pm.isNull():
             return pm
 
@@ -279,9 +226,10 @@ class SideBar(QWidget):
 
         img_path = self._get_profile_image_path()
 
+        # 1) Try image
         try:
             if img_path and os.path.exists(img_path):
-                pm = _load_pixmap_fresh(img_path)
+                pm = QPixmap(img_path)
                 if not pm.isNull():
                     rounded = self._rounded_pixmap(pm, avatar_size, radius)
                     self._footer_avatar.setPixmap(rounded)
@@ -292,11 +240,11 @@ class SideBar(QWidget):
                             border-radius: 10px;
                         }
                     """)
-                    self._footer_avatar.update()
                     return
         except Exception:
             pass
 
+        # 2) Fallback to initials (default)
         initials = self._derive_initials(self.user.get("full_name", "User"))
         self._footer_avatar.setPixmap(QPixmap())
         self._footer_avatar.setText(initials)
@@ -309,12 +257,16 @@ class SideBar(QWidget):
                 font-weight: 800;
             }
         """)
-        self._footer_avatar.update()
 
     # ---------------------------------------------------------
-    # Click helpers
+    # Menu click helper (CRITICAL FIX)
     # ---------------------------------------------------------
     def _bind_row_click(self, row_widget: _SidebarItemWidget, row_index: int):
+        """
+        When using setItemWidget(), clicks can land on the child widget and NOT
+        select the QListWidget row. This forces the row selection on click,
+        so currentRowChanged fires and navigation works (e.g., Sales button).
+        """
         def handler(event, idx=row_index):
             try:
                 self.menu.setCurrentRow(idx)
@@ -325,6 +277,7 @@ class SideBar(QWidget):
             except Exception:
                 pass
 
+        # Make entire row feel clickable
         for w in (row_widget, row_widget.icon_lbl, row_widget.text_lbl):
             try:
                 w.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -332,11 +285,15 @@ class SideBar(QWidget):
             except Exception:
                 pass
 
+    # ---------------------------------------------------------
+    # Footer click helper (makes avatar/name/role clickable)
+    # ---------------------------------------------------------
     def _bind_footer_click(self):
         if not self._footer_frame:
             return
 
         def handler(event):
+            # don't steal clicks from the menu button
             if self._btn_footer_menu:
                 try:
                     if self._btn_footer_menu.underMouse():
@@ -367,6 +324,7 @@ class SideBar(QWidget):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(16)
 
+        # Brand block
         brand_card = QFrame()
         brand_card.setObjectName("sidebarBrandCard")
         brand_layout = QHBoxLayout(brand_card)
@@ -398,11 +356,13 @@ class SideBar(QWidget):
 
         layout.addWidget(brand_card)
 
+        # Section label
         section = QLabel("MAIN")
         section.setObjectName("sidebarSection")
         self._label_widgets.append(section)
         layout.addWidget(section)
 
+        # Menu
         self.menu = QListWidget()
         self.menu.setObjectName("sidebarMenu")
         self.menu.setSpacing(6)
@@ -421,6 +381,9 @@ class SideBar(QWidget):
         for idx, (label, icon_key) in enumerate(menu_items):
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, label)
+
+            # ✅ Design fix: keep height, avoid forcing a fixed width that can cause
+            # partial row painting / weird empty strips.
             item.setSizeHint(QSize(1, 46))
 
             w = _SidebarItemWidget(
@@ -433,6 +396,8 @@ class SideBar(QWidget):
 
             self.menu.addItem(item)
             self.menu.setItemWidget(item, w)
+
+            # ✅ CRITICAL FIX: make the widget select its row on click
             self._bind_row_click(w, idx)
 
             self._items[label.lower()] = item
@@ -442,6 +407,7 @@ class SideBar(QWidget):
         layout.addWidget(self.menu, 1)
         layout.addStretch(0)
 
+        # Footer
         footer = QFrame()
         footer.setObjectName("sidebarFooter")
         self._footer_frame = footer
@@ -451,6 +417,7 @@ class SideBar(QWidget):
         f_layout.setContentsMargins(12, 12, 12, 12)
         f_layout.setSpacing(10)
 
+        # Avatar
         self._footer_avatar = QLabel()
         self._footer_avatar.setObjectName("sidebarAvatar")
         self._footer_avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -501,6 +468,8 @@ class SideBar(QWidget):
         f_layout.addWidget(btn_menu)
 
         layout.addWidget(footer)
+
+        # ✅ Make the whole footer clickable (avatar/name/role)
         self._bind_footer_click()
 
     def _set_toggle_logo_icon(self):
@@ -658,8 +627,7 @@ class SideBar(QWidget):
                 background: transparent;
             }
 
-            /* ✅ fix: text color driven directly by label's own selected property */
-            QLabel#sidebarItemText[selected="true"] {
+            QWidget#sidebarItem[selected="true"] QLabel#sidebarItemText {
                 color: #FFFFFF;
             }
 

@@ -8,13 +8,11 @@ from typing import Optional, Dict, Any, List
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QTextEdit, QComboBox, QSpinBox, QPushButton, QFrame,
-    QMessageBox, QDateEdit, QFileDialog
+    QMessageBox, QDateEdit
 )
 from PyQt6.QtCore import Qt, QDate, pyqtSignal
-from PyQt6.QtGui import QPixmap
 
 from desktop_app.api_client.stockadoodle_api import StockaDoodleAPI, StockaDoodleAPIError
-from desktop_app.ui.components.product_card import ProductCard
 
 
 class ProductFormPage(QWidget):
@@ -23,10 +21,10 @@ class ProductFormPage(QWidget):
 
     - Loads categories from API
     - Sends category_id to backend
-    - ✅ Supports image upload/replace (multipart) via StockaDoodleAPI
-    - ✅ Invalidates ProductCard thumbnail cache after save
+    - Works for create and optional edit-mode
     """
 
+    # Let parent pages refresh lists after save
     product_saved = pyqtSignal(dict)
 
     def __init__(
@@ -39,29 +37,39 @@ class ProductFormPage(QWidget):
         self.user = user_data or {}
         self.api = StockaDoodleAPI()
 
+        # If product is passed, treat as edit mode
         self.product = product
+
         self._categories: List[Dict[str, Any]] = []
-
-        self.selected_image_bytes: bytes | None = None
-        self.selected_image_path: str | None = None
-
         self._build_ui()
         self._load_categories()
         self._load_product_if_edit()
 
+    # ------------------------------------------------------------
+    # UI
+    # ------------------------------------------------------------
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(32, 28, 32, 28)
         root.setSpacing(18)
 
+        # Header
         title = QLabel("Add Product" if not self.product else "Edit Product")
-        title.setStyleSheet("font-size: 24px; font-weight: 800; color: #0A0A0A;")
+        title.setStyleSheet("""
+            font-size: 24px;
+            font-weight: 800;
+            color: #0A0A0A;
+        """)
         subtitle = QLabel("Fill in product details. Category is required.")
-        subtitle.setStyleSheet("font-size: 12px; color: rgba(0,0,0,0.55);")
+        subtitle.setStyleSheet("""
+            font-size: 12px;
+            color: rgba(0,0,0,0.55);
+        """)
 
         root.addWidget(title)
         root.addWidget(subtitle)
 
+        # Card container
         card = QFrame()
         card.setObjectName("productFormCard")
         card.setStyleSheet("""
@@ -76,48 +84,33 @@ class ProductFormPage(QWidget):
         cl.setContentsMargins(22, 20, 22, 20)
         cl.setSpacing(14)
 
+        # --------------------------
+        # Name
+        # --------------------------
         cl.addWidget(self._label("Product Name"))
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("e.g., Nescafe Coffee 3-in-1")
         cl.addWidget(self.name_input)
 
+        # --------------------------
+        # Brand
+        # --------------------------
         cl.addWidget(self._label("Brand (optional)"))
         self.brand_input = QLineEdit()
         self.brand_input.setPlaceholderText("e.g., Nestlé")
         cl.addWidget(self.brand_input)
 
+        # --------------------------
+        # Category
+        # --------------------------
         cl.addWidget(self._label("Category"))
         self.category_combo = QComboBox()
         self.category_combo.addItem("Loading categories...", None)
         cl.addWidget(self.category_combo)
 
-        # ✅ Image picker row
-        cl.addWidget(self._label("Product Image (optional)"))
-        img_row = QHBoxLayout()
-        img_row.setSpacing(12)
-
-        self.img_preview = QLabel("No Image")
-        self.img_preview.setFixedSize(120, 120)
-        self.img_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.img_preview.setStyleSheet("""
-            QLabel {
-                background: #F8FAFF;
-                border: 1px dashed #D7DEEE;
-                border-radius: 10px;
-                color: rgba(15,23,42,0.45);
-                font-size: 11px;
-                font-weight: 600;
-            }
-        """)
-
-        self.btn_choose_image = QPushButton("Choose Image")
-        self.btn_choose_image.setFixedHeight(34)
-        self.btn_choose_image.clicked.connect(self._choose_image)
-
-        img_row.addWidget(self.img_preview, 0)
-        img_row.addWidget(self.btn_choose_image, 1)
-        cl.addLayout(img_row)
-
+        # --------------------------
+        # Price + Min Stock row
+        # --------------------------
         row1 = QHBoxLayout()
         row1.setSpacing(12)
 
@@ -140,6 +133,9 @@ class ProductFormPage(QWidget):
         row1.addLayout(right, 1)
         cl.addLayout(row1)
 
+        # --------------------------
+        # Initial Stock + Expiration row
+        # --------------------------
         row2 = QHBoxLayout()
         row2.setSpacing(12)
 
@@ -164,12 +160,18 @@ class ProductFormPage(QWidget):
         row2.addLayout(right2, 1)
         cl.addLayout(row2)
 
+        # --------------------------
+        # Details
+        # --------------------------
         cl.addWidget(self._label("Details (optional)"))
         self.details_input = QTextEdit()
         self.details_input.setPlaceholderText("Short product notes or description...")
         self.details_input.setFixedHeight(90)
         cl.addWidget(self.details_input)
 
+        # --------------------------
+        # Buttons
+        # --------------------------
         btn_row = QHBoxLayout()
         btn_row.addStretch()
 
@@ -198,66 +200,38 @@ class ProductFormPage(QWidget):
                 font-weight: 700;
                 border: none;
             }
-            QPushButton:disabled { background: #9CA3AF; }
+            QPushButton:disabled {
+                background: #9CA3AF;
+            }
         """)
 
         btn_row.addWidget(self.cancel_btn)
         btn_row.addWidget(self.save_btn)
+
         cl.addLayout(btn_row)
 
         root.addWidget(card)
 
+        # Wire
         self.cancel_btn.clicked.connect(self._handle_cancel)
         self.save_btn.clicked.connect(self._handle_save)
 
     def _label(self, text: str) -> QLabel:
         lbl = QLabel(text)
-        lbl.setStyleSheet("font-size: 11px; color: rgba(0,0,0,0.55); font-weight: 600;")
+        lbl.setStyleSheet("""
+            font-size: 11px;
+            color: rgba(0,0,0,0.55);
+            font-weight: 600;
+        """)
         return lbl
 
-    def _set_preview_from_bytes(self, blob: bytes | None):
-        if not blob:
-            self.img_preview.setText("No Image")
-            self.img_preview.setPixmap(QPixmap())
-            return
-
-        pix = QPixmap()
-        ok = pix.loadFromData(blob)
-        if not ok or pix.isNull():
-            self.img_preview.setText("Invalid")
-            self.img_preview.setPixmap(QPixmap())
-            return
-
-        pix = pix.scaled(
-            self.img_preview.width(),
-            self.img_preview.height(),
-            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-            Qt.TransformationMode.SmoothTransformation
-        )
-        self.img_preview.setText("")
-        self.img_preview.setPixmap(pix)
-
-    def _choose_image(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Choose Product Image",
-            "",
-            "Images (*.png *.jpg *.jpeg *.webp *.gif);;All Files (*.*)"
-        )
-        if not path:
-            return
-
-        try:
-            with open(path, "rb") as f:
-                self.selected_image_bytes = f.read()
-            self.selected_image_path = path
-            self._set_preview_from_bytes(self.selected_image_bytes)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to read image:\n{e}")
-
+    # ------------------------------------------------------------
+    # DATA: categories
+    # ------------------------------------------------------------
     def _load_categories(self):
         try:
             self._categories = self.api.get_categories(include_image=False) or []
+
             self.category_combo.clear()
 
             if not self._categories:
@@ -265,7 +239,9 @@ class ProductFormPage(QWidget):
                 return
 
             self.category_combo.addItem("Select a category...", None)
+
             for c in self._categories:
+                # Expecting {"id": int, "name": str}
                 cid = c.get("id")
                 cname = c.get("name") or "Unnamed"
                 self.category_combo.addItem(cname, cid)
@@ -274,6 +250,9 @@ class ProductFormPage(QWidget):
             self.category_combo.clear()
             self.category_combo.addItem("Failed to load categories", None)
 
+    # ------------------------------------------------------------
+    # DATA: edit mode
+    # ------------------------------------------------------------
     def _load_product_if_edit(self):
         if not self.product:
             return
@@ -284,8 +263,11 @@ class ProductFormPage(QWidget):
         self.min_stock_spin.setValue(int(self.product.get("min_stock_level", 10)))
         self.details_input.setPlainText(self.product.get("details", ""))
 
+        # Stock is computed via batches; we won't prefill "initial stock" in edit mode
         self.stock_spin.setValue(0)
 
+        # If the product dict includes category_id use it;
+        # if only category name is present, best effort select by name.
         category_id = self.product.get("category_id")
         category_name = self.product.get("category")
 
@@ -293,13 +275,6 @@ class ProductFormPage(QWidget):
             self._select_category_by_id(category_id)
         elif category_name:
             self._select_category_by_name(category_name)
-
-        try:
-            if self.product.get("has_image") and self.product.get("id"):
-                blob = self.api.get_product_image(int(self.product["id"]))
-                self._set_preview_from_bytes(blob)
-        except Exception:
-            pass
 
         self.save_btn.setText("Update Product")
 
@@ -317,16 +292,17 @@ class ProductFormPage(QWidget):
                 self.category_combo.setCurrentIndex(i)
                 return
 
+    # ------------------------------------------------------------
+    # ACTIONS
+    # ------------------------------------------------------------
     def _handle_cancel(self):
+        # Just clear fields if used standalone
         self.name_input.clear()
         self.brand_input.clear()
         self.price_input.clear()
         self.min_stock_spin.setValue(10)
         self.stock_spin.setValue(0)
         self.details_input.clear()
-        self.selected_image_bytes = None
-        self.selected_image_path = None
-        self._set_preview_from_bytes(None)
         if self.category_combo.count() > 0:
             self.category_combo.setCurrentIndex(0)
 
@@ -354,6 +330,7 @@ class ProductFormPage(QWidget):
 
         price = int(price_text)
 
+        # Expiration date only meaningful if initial stock is used
         expiration_date = None
         if stock_level > 0:
             expiration_date = self.exp_date.date().toString("yyyy-MM-dd")
@@ -371,37 +348,27 @@ class ProductFormPage(QWidget):
                     details=details,
                     stock_level=stock_level if stock_level > 0 else None,
                     expiration_date=expiration_date,
-                    added_by=added_by,
-                    product_image=self.selected_image_bytes
+                    added_by=added_by
                 )
                 QMessageBox.information(self, "Success", "Product created successfully.")
-
-                if isinstance(created, dict) and created.get("id") is not None:
-                    ProductCard.invalidate_thumb_cache(int(created["id"]))
-
                 self.product_saved.emit(created)
 
             else:
-                pid = int(self.product.get("id", 0) or 0)
-
+                # PATCH update
                 updated = self.api.update_product(
-                    pid,
+                    self.product.get("id"),
                     name=name,
                     price=price,
                     brand=brand,
                     category_id=category_id,
                     min_stock_level=min_stock,
                     details=details,
+                    # Optional: allow "stock_level" additive restock only if user typed >0
                     stock_level=stock_level if stock_level > 0 else None,
                     expiration_date=expiration_date,
-                    added_by=added_by,
-                    product_image=self.selected_image_bytes
+                    added_by=added_by
                 )
                 QMessageBox.information(self, "Success", "Product updated successfully.")
-
-                if pid:
-                    ProductCard.invalidate_thumb_cache(pid)
-
                 self.product_saved.emit(updated)
 
         except StockaDoodleAPIError as e:

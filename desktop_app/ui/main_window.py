@@ -60,9 +60,6 @@ class MainWindow(QMainWindow):
     - "Sales" = sales records/history (SalesRecordsPage)
     """
 
-    # ✅ main.py will listen to this and reopen login window
-    logout_requested = pyqtSignal()
-
     def __init__(self, user_data=None):
         super().__init__()
         self.user = user_data or {}
@@ -150,6 +147,7 @@ class MainWindow(QMainWindow):
         self.navigate_to("Dashboard" if "Dashboard" in self.pages_by_label else "Profile")
 
         # ✅ Design fix only:
+        # Ensure right panel + stacked widget never shows default Qt gray.
         self.setStyleSheet("""
             QFrame#rightWrap {
                 background: transparent;
@@ -298,6 +296,8 @@ class MainWindow(QMainWindow):
                     lambda: self.navigate_to("Activity")
                 )
 
+        # ✅ If ProfilePage emits user updates (new photo/name),
+        # refresh sidebar footer avatar + update local user dict.
         if hasattr(self, "profile_page") and hasattr(self.profile_page, "user_updated"):
             try:
                 self.profile_page.user_updated.connect(self._on_user_updated)
@@ -305,15 +305,20 @@ class MainWindow(QMainWindow):
                 pass
 
     def _on_user_updated(self, patch: dict):
+        """
+        patch can be partial like {"profile_image_path": "C:/.../avatar.png"}.
+        """
         if isinstance(patch, dict):
             self.user.update(patch)
 
+        # refresh sidebar footer
         if hasattr(self, "sidebar") and hasattr(self.sidebar, "update_user"):
             try:
                 self.sidebar.update_user(self.user)
             except Exception:
                 pass
 
+        # optional sync for pages that keep a reference
         try:
             if hasattr(self, "dashboard_page"):
                 self.dashboard_page.user = self.user
@@ -347,6 +352,7 @@ class MainWindow(QMainWindow):
 
         self.stack.setCurrentWidget(widget)
 
+        # Sync sidebar highlight
         for i in range(self.sidebar.menu.count()):
             it = self.sidebar.menu.item(i)
             if not it:
@@ -365,11 +371,5 @@ class MainWindow(QMainWindow):
             "Are you sure you want to log out?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        # ✅ tell main.py: go back to login
-        self.logout_requested.emit()
-
-        # ✅ close this window
-        self.close()
+        if reply == QMessageBox.StandardButton.Yes:
+            self.close()

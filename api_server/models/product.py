@@ -78,6 +78,8 @@ class Product(BaseDocument):
         if include_image and self.product_image:
             data["image_data"] = base64.b64encode(self.product_image).decode('utf-8')
  
+            data["image_data"] = self.product_image
+
         if include_batches:
             from .stock_batch import StockBatch
             # predictable order: exp earliest first, then added_at, then id

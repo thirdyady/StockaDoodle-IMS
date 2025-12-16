@@ -109,3 +109,4 @@ if __name__ == '__main__':
         host = host.split(":")[0]
 
     app.run(host=host, port=port, debug=True)
+    app.run(host=host, port=port, debug=True)

@@ -22,11 +22,14 @@ def _get_json_body() -> dict:
 @bp.route("/low-stock", methods=["POST"])
 def send_low_stock_alerts():
     data = _get_json_body()
+    """Send low stock alerts to managers"""
+    data = request.get_json() or {}
 
     try:
         result = NotificationService.send_low_stock_alerts()
 
         triggered_by = data.get("triggered_by")
+        triggered_by = data.get('triggered_by')
         ActivityLogger.log_api_activity(
             method="POST",
             target_entity="notification",
@@ -51,6 +54,11 @@ def send_expiration_alerts():
     data = _get_json_body()
 
     days_ahead = data.get("days_ahead", 7)
+    """Send expiration alerts to managers"""
+    data = request.get_json() or {}
+
+    days_ahead = data.get('days_ahead', 7)
+
     try:
         days_ahead = int(days_ahead)
     except (TypeError, ValueError):
@@ -60,6 +68,7 @@ def send_expiration_alerts():
         result = NotificationService.send_expiration_alerts(days_ahead)
 
         triggered_by = data.get("triggered_by")
+        triggered_by = data.get('triggered_by')
         ActivityLogger.log_api_activity(
             method="POST",
             target_entity="notification",
@@ -81,11 +90,14 @@ def send_expiration_alerts():
 @bp.route("/daily-summary", methods=["POST"])
 def send_daily_summary():
     data = _get_json_body()
+    """Send daily inventory summary to managers"""
+    data = request.get_json() or {}
 
     try:
         result = NotificationService.send_daily_summary()
 
         triggered_by = data.get("triggered_by")
+        triggered_by = data.get('triggered_by')
         ActivityLogger.log_api_activity(
             method="POST",
             target_entity="notification",
@@ -95,6 +107,10 @@ def send_daily_summary():
                 f"{result.get('low_stock_count', 0)} low stock, "
                 f"{result.get('expiring_count', 0)} expiring"
             ),
+                f"Daily summary sent: "
+                f"{result.get('low_stock_count', 0)} low stock, "
+                f"{result.get('expiring_count', 0)} expiring"
+            )
         )
 
         return jsonify(result), 200
@@ -116,6 +132,15 @@ def get_notification_history():
         notification_type = request.args.get("notification_type")
 
         logs_qs = ActivityLogger.get_api_logs(limit=limit, target_entity="notification")
+        limit = request.args.get('limit', 50, type=int)
+        notification_type = request.args.get('notification_type')
+
+        logs_qs = ActivityLogger.get_api_logs(
+            limit=limit,
+            target_entity='notification'
+        )
+
+        # Evaluate queryset into a list for safe filtering
         logs = list(logs_qs)
 
         if notification_type:
@@ -126,6 +151,21 @@ def get_notification_history():
             ]
 
         return jsonify({"total": len(logs), "notifications": [log.to_dict() for log in logs]}), 200
+
+            def _matches(log):
+                details = (log.details or "")
+                try:
+                    details_lower = details.lower()
+                except Exception:
+                    details_lower = ""
+                return nt in details_lower
+
+            logs = [log for log in logs if _matches(log)]
+
+        return jsonify({
+            'total': len(logs),
+            'notifications': [log.to_dict() for log in logs]
+        }), 200
 
     except Exception as e:
         return jsonify({"errors": [f"Failed to get history: {str(e)}"]}), 500
