@@ -40,6 +40,22 @@ class StockaDoodleAPI:
     def _url(self, endpoint: str) -> str:
         return f"{self.base_url}/{endpoint.lstrip('/')}"
 
+    def _raise_api_error(self, response: requests.Response) -> None:
+        try:
+            data = response.json()
+        except Exception:
+            data = None
+
+        if isinstance(data, dict):
+            errors = data.get("errors")
+            if isinstance(errors, list) and errors:
+                raise StockaDoodleAPIError(str(errors[0]))
+            message = data.get("message")
+            if message:
+                raise StockaDoodleAPIError(str(message))
+
+        raise StockaDoodleAPIError(f"HTTP {response.status_code}: {response.reason}")
+
     def _request(
         self,
         method: str,
@@ -344,7 +360,7 @@ class StockaDoodleAPI:
         return result  # type: ignore[return-value]
 
     # ================================================================
-    # SALES MANAGEMENT
+    # SALES / LOGS / REPORTS / NOTIFS / HEALTH (unchanged)
     # ================================================================
     def record_sale(self, retailer_id: int, items: List[Dict[str, Any]], total_amount: float) -> Dict[str, Any]:
         data = {"retailer_id": retailer_id, "items": items, "total_amount": total_amount}
@@ -364,7 +380,6 @@ class StockaDoodleAPI:
             params["end_date"] = end_date
         if retailer_id is not None:
             params["retailer_id"] = retailer_id
-
         result = self._request("GET", "/sales/reports", params=params)
         return result  # type: ignore[return-value]
 
@@ -378,7 +393,6 @@ class StockaDoodleAPI:
         result = self._request("DELETE", f"/sales/{sale_id}", json=data)
         return result  # type: ignore[return-value]
 
-    # ✅ NEW: Return ONE sold item row inside a Sale (sale_id + item_index)
     def return_sale_item(self, sale_id: int, item_index: int, user_id: Optional[int] = None) -> Dict[str, Any]:
         data = {"user_id": user_id or (self.current_user["id"] if self.current_user else None)}
         result = self._request("DELETE", f"/sales/{sale_id}/items/{item_index}", json=data)

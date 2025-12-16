@@ -1,6 +1,9 @@
+# desktop_app/main.py
+
 import sys
 import os
 import traceback
+
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QIcon
 
@@ -50,6 +53,8 @@ def on_login_successful(user_data: dict):
         print("❌ ERROR WHILE OPENING MAIN WINDOW:", str(e))
         raise e
 
+from desktop_app.utils.app_state import set_current_user
+from desktop_app.utils.style_presets import get_global_stylesheet
 
 def main():
     app = QApplication(sys.argv)

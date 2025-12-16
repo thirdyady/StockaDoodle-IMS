@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import io
+import imghdr
+from datetime import datetime, timezone
+
+from flask import Blueprint, request, jsonify, send_file
 from flask import Blueprint, request, jsonify
 from mongoengine import Q
 from mongoengine.errors import DoesNotExist
@@ -13,7 +18,6 @@ from core.inventory_manager import InventoryManager, InventoryError
 from core.activity_logger import ActivityLogger
 
 from utils import get_image_binary, extract_int, parse_date
-from datetime import datetime, timezone
 
 bp = Blueprint('products', __name__)
 
@@ -34,6 +38,23 @@ def _get_actor_user(actor_id: int):
 
 def _err(msg: str, code: int = 400):
     return jsonify({"errors": [msg]}), code
+
+
+def _detect_image_mimetype(blob: bytes) -> tuple[str, str]:
+    """
+    Returns (mimetype, ext) best-effort.
+    """
+    kind = imghdr.what(None, h=blob)  # 'png', 'jpeg', etc.
+    if kind in ("jpeg", "jpg"):
+        return "image/jpeg", "jpg"
+    if kind == "png":
+        return "image/png", "png"
+    if kind == "gif":
+        return "image/gif", "gif"
+    if kind == "webp":
+        return "image/webp", "webp"
+    # fallback
+    return "application/octet-stream", "bin"
 
 
 # ----------------------------------------------------------------------
@@ -115,6 +136,32 @@ def get_product(id):
 
 
 # ----------------------------------------------------------------------
+# ✅ NEW: GET /api/v1/products/<id>/image → fetch product image bytes
+# ----------------------------------------------------------------------
+@bp.route('/<int:id>/image', methods=['GET'])
+def get_product_image(id: int):
+    product = Product.objects(id=id).first()
+    if not product:
+        return _err("Product not found", 404)
+
+    blob = product.product_image
+    if not blob:
+        return _err("No product image", 404)
+
+    mimetype, ext = _detect_image_mimetype(blob)
+
+    resp = send_file(
+        io.BytesIO(blob),
+        mimetype=mimetype,
+        as_attachment=False,
+        download_name=f"product_{id}.{ext}"
+    )
+    # light caching
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+# ----------------------------------------------------------------------
 # GET /api/v1/products/<product_id>/stock_batches → list all batches
 # ----------------------------------------------------------------------
 @bp.route('/<int:product_id>/stock_batches', methods=['GET'])
@@ -161,6 +208,7 @@ def create_product():
         if not Category.objects(id=category_id).first():
             return _err("Invalid category ID", 400)
 
+    if category_id is None:
     # If category_id is still required in your Product model,
     # enforce here to avoid 500
     if category_id is None:
@@ -560,7 +608,6 @@ def delete_product(id):
 
     name = product.name
 
-    # Delete child batches first (cleanliness)
     StockBatch.objects(product_id=product.id).delete()
     product.delete()
 
@@ -595,7 +642,6 @@ def delete_stock_batch(product_id, batch_id):
     if not batch:
         return _err("Stock batch not found", 404)
 
-    # Safety rule: allow delete only if empty
     if (batch.quantity or 0) > 0:
         return _err("Cannot delete a batch with remaining stock. Dispose stock first.", 400)
 
