@@ -116,17 +116,36 @@ Build API routes, integrate core services, and implement reporting and notificat
 
 ### **Milestone 5 (Dec Week 1): Final Integration & Documentation**
 **What we'll do:**  
-Finalize UI integration (if applicable) and ensure all APIs are functional and documented.
+Change database integration from SQLite to MongoDB (NoSQL).
+Rewrite backend logic and models to match MongoDB/Mongoose syntax.
+Finalize UI integration and ensure all components communicate correctly with the new database structure.
+Ensure all APIs are functional, tested, and fully documented.
 
 **Deliverables:**  
 - Completed documentation (README, API, screenshots)  
-- Stable final API release  
-- Submission-ready project  
+- Stable final API release with MongoDB connection
+- Submission-ready project repository 
 
 **Checklists:**  
-- [ ] Merge all branches  
-- [ ] Review code consistency  
-- [ ] Write final documentation  
-- [ ] Submit repository link on Moodle  
+- [ ] Change database integration from SQLite to MongoDB
+- [ ] Review backend code to match MongoDB syntax 
+- [ ] Review code consistency and error handling
+
+---
+
+### **Final (Dec Week 2): Full Demo & Presentation**
+**What we'll do:**  
+Explain the problem, your solution, and the shift from SQL to NoSQL.
+Perform a live demo of the frontend and the functional API.
+Show OpenAPI/Swagger docs and how they match the implementation.
+
+**Deliverables:**  
+- Slide deck or short document highlighting key features and architecture.
+- Final README.md containing the full project overview.
+
+**Checklists:**  
+- [ ] Slides ready
+- [ ] Demo data seeded in MongoDB
+- [ ] Write final documentation in README.md
 
 ---
